@@ -36,7 +36,9 @@ baserom*
 captures/
 saves/
 runtime-data/
-analysis/
+# Bring-up notes for this port only. Unanchored `analysis/` also ate
+# rabbitizer's `src/analysis` and `include/analysis`, which the CI needs.
+projects/turok2-decomp/analysis/
 flakiness/
 deliverables/
 *.rej

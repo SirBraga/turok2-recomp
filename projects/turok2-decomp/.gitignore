@@ -64,7 +64,8 @@ versions/undefined_funcs_extra.us.txt
 
 # Instrucciones de workspace para Claude Code — locales, no se publican
 CLAUDE.md
-RecompiledFuncs/
+# RecompiledFuncs is the game translation unit set. The Windows CI cannot
+# regenerate it (no ROM on the runner), so it has to live in the repo.
 turok2.us.toml.local
 
 # Claude Code workspace state — never publish
