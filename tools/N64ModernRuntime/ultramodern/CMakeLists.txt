@@ -30,11 +30,13 @@ target_include_directories(ultramodern PUBLIC
     "${PROJECT_SOURCE_DIR}/../thirdparty/sse2neon"
 )
 
-target_compile_options(ultramodern PRIVATE
-#    -Wall
-#    -Wextra
-    -Wno-unused-parameter
-)
+if(NOT MSVC)
+    target_compile_options(ultramodern PRIVATE
+    #    -Wall
+    #    -Wextra
+        -Wno-unused-parameter
+    )
+endif()
 
 if (WIN32)
     add_compile_definitions(NOMINMAX)

@@ -46,9 +46,11 @@ elseif (APPLE OR CMAKE_SYSTEM_NAME MATCHES "Linux")
     target_include_directories(recompinput PRIVATE ${SDL2_INCLUDE_DIRS})
 endif()
 
-target_compile_options(recompinput PRIVATE
-    -Wno-unused-parameter
-)
+if(NOT MSVC)
+    target_compile_options(recompinput PRIVATE
+        -Wno-unused-parameter
+    )
+endif()
 
 if (WIN32)
     add_compile_definitions(NOMINMAX)
