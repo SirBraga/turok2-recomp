@@ -12,6 +12,12 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+if(WIN32)
+    # windows.h defines min/max (and the 16-bit leftovers near/far). Those
+    # macros turn std::min/std::max and locals named far into syntax errors.
+    add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN)
+endif()
+
 set(N64RECOMP_ROOT
     "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/N64ModernRuntime/N64Recomp"
     CACHE PATH "Path to the N64Recomp headers bundled with N64ModernRuntime")

@@ -121,7 +121,7 @@ if(NOT MSVC)
 endif()
 
 if (WIN32)
-    add_compile_definitions(NOMINMAX)
+    target_compile_definitions(recompui PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN)
 endif()
 
 target_link_libraries(recompui PUBLIC

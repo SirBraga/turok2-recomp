@@ -18,8 +18,25 @@
 #include <unistd.h>
 #else
 // GetCurrentThreadId, for the window handle RT64 expects on Windows.
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
 #include <windows.h>
+#ifdef min
+#undef min
+#endif
+#ifdef max
+#undef max
+#endif
+#ifdef near
+#undef near
+#endif
+#ifdef far
+#undef far
+#endif
 #endif
 
 #define SDL_MAIN_HANDLED
