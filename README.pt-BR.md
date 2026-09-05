@@ -5,7 +5,7 @@
 [![status](https://img.shields.io/badge/status-testes%20iniciais-orange)](https://github.com/SirBraga/turok2-recomp)
 [![cadence](https://img.shields.io/badge/cadence-120%20FPS%20%2F%20120%20Hz-brightgreen)](https://github.com/SirBraga/turok2-recomp)
 [![platform](https://img.shields.io/badge/windows-x64%20build-0078D6)](https://github.com/SirBraga/turok2-recomp/actions)
-[![engine](https://img.shields://img.shields.io/badge/renderer-RT64-lightgrey)](https://github.com/rt64/rt64)
+[![engine](https://img.shields.io/badge/renderer-RT64-lightgrey)](https://github.com/rt64/rt64)
 [![pipeline](https://img.shields.io/badge/pipeline-N64Recomp-blue)](https://github.com/Mr-Wiseguy/N64Recomp)
 
 Port nativo de **Turok 2: Seeds of Evil** (Nintendo 64, USA 1.0) feito com [N64Recomp](https://github.com/Mr-Wiseguy/N64Recomp), [N64ModernRuntime](https://github.com/Mr-Wiseguy/N64ModernRuntime), [RT64](https://github.com/rt64/rt64) e [RecompFrontend](https://github.com/N64Recomp/RecompFrontend).
