@@ -10,6 +10,7 @@
 !src/contrib/mupen64plus-win32-deps/**/*.lib
 !src/contrib/dxc/bin/x64/*.exe
 !src/contrib/dxc/bin/x64/*.dll
+!src/contrib/dxc/lib/x64/*.lib
 *.exp
 *.ipdb
 *.iobj
