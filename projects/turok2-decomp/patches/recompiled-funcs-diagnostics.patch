@@ -1,0 +1,544 @@
+--- a/RecompiledFuncs/funcs_28.c
++++ b/RecompiledFuncs/funcs_28.c
+@@ -1,5 +1,6 @@
+ #include "recomp.h"
+ #include "funcs.h"
++#include <stdio.h>
+ 
+ RECOMP_FUNC void func_004035CC(uint8_t* rdram, recomp_context* ctx) {
+     uint64_t hi = 0, lo = 0, result = 0;
+@@ -4358,8 +4359,11 @@
+ RECOMP_FUNC void func_00201C60(uint8_t* rdram, recomp_context* ctx) {
+     uint64_t hi = 0, lo = 0, result = 0;
+     int c1cs = 0;
++    uint32_t trace_thread_sp = 0;
++    uint32_t trace_job = 0;
+     // 0x00201C60: addiu       $sp, $sp, -0x20
+     ctx->r29 = ADD32(ctx->r29, -0X20);
++    trace_thread_sp = (uint32_t)ctx->r29;
+     // 0x00201C64: sw          $s0, 0x18($sp)
+     MEM_W(0X18, ctx->r29) = ctx->r16;
+     // 0x00201C68: addu        $s0, $a0, $zero
+@@ -4385,6 +4389,10 @@
+     ctx->r2 = MEM_W(ctx->r2, 0X6D18);
+     // 0x00201C88: lw          $a1, 0x10($sp)
+     ctx->r5 = MEM_W(ctx->r29, 0X10);
++    trace_job = (uint32_t)ctx->r5;
++    fprintf(stderr, "[job:before] sp=%08X job=%08X arg=%08X cb=%08X queue=%08X\n",
++            (uint32_t)ctx->r29, trace_job, MEM_W(trace_job, 0X18),
++            MEM_W(trace_job, 0X14), MEM_W(trace_job, 0X20));
+     // 0x00201C8C: sw          $v0, 0x1448($s0)
+     MEM_W(0X1448, ctx->r16) = ctx->r2;
+     // 0x00201C90: lw          $a0, 0x18($a1)
+@@ -4399,6 +4407,9 @@
+     // 0x00201C9C: nop
+ 
+     after_1:
++    fprintf(stderr, "[job:after] sp=%08X expected=%08X job=%08X slot=%08X queue=%08X\n",
++            (uint32_t)ctx->r29, trace_thread_sp, trace_job,
++            MEM_W(trace_thread_sp, 0X10), MEM_W(trace_job, 0X20));
+     // 0x00201CA0: lw          $a1, 0x10($sp)
+     ctx->r5 = MEM_W(ctx->r29, 0X10);
+     // 0x00201CA4: lw          $a0, 0x20($a1)
+--- a/RecompiledFuncs/funcs_5.c
++++ b/RecompiledFuncs/funcs_5.c
+@@ -1,5 +1,6 @@
+ #include "recomp.h"
+ #include "funcs.h"
++#include <stdio.h>
+ 
+ RECOMP_FUNC void func_0023E820(uint8_t* rdram, recomp_context* ctx) {
+     uint64_t hi = 0, lo = 0, result = 0;
+@@ -2998,6 +2999,9 @@
+     ctx->r5 = ADD32(ctx->r17, 0);
+     after_85:
+ L_0042AA4C:
++    fprintf(stderr, "[state:429fa0-before-ac0c] sp=%08X live_s2=%08X saved_s2=%08X saved_s3=%08X\n",
++        (uint32_t)ctx->r29, (uint32_t)ctx->r18,
++        (uint32_t)MEM_W(ctx->r29, 0X40), (uint32_t)MEM_W(ctx->r29, 0X44));
+     // 0x0042AA4C: addu        $a0, $s3, $zero
+     ctx->r4 = ADD32(ctx->r19, 0);
+     // 0x0042AA50: addu        $a1, $zero, $zero
+@@ -3010,6 +3014,9 @@
+     // 0x0042AA58: addu        $a2, $a1, $zero
+     ctx->r6 = ADD32(ctx->r5, 0);
+     after_86:
++    fprintf(stderr, "[state:429fa0-epilogue] sp=%08X live_s2=%08X saved_s2=%08X saved_s3=%08X\n",
++        (uint32_t)ctx->r29, (uint32_t)ctx->r18,
++        (uint32_t)MEM_W(ctx->r29, 0X40), (uint32_t)MEM_W(ctx->r29, 0X44));
+     // 0x0042AA5C: lw          $ra, 0x50($sp)
+     ctx->r31 = MEM_W(ctx->r29, 0X50);
+     // 0x0042AA60: lw          $s5, 0x4C($sp)
+--- a/RecompiledFuncs/funcs_50.c
++++ b/RecompiledFuncs/funcs_50.c
+@@ -1,5 +1,6 @@
+ #include "recomp.h"
+ #include "funcs.h"
++#include <stdio.h>
+ 
+ RECOMP_FUNC void func_0025A5D4(uint8_t* rdram, recomp_context* ctx) {
+     uint64_t hi = 0, lo = 0, result = 0;
+@@ -648,6 +650,7 @@
+     int c1cs = 0;
+     // 0x0042AC0C: addiu       $sp, $sp, -0x38
+     ctx->r29 = ADD32(ctx->r29, -0X38);
++    const uint32_t trace_ac0c_sp = (uint32_t)ctx->r29;
+     // 0x0042AC10: sw          $s3, 0x2C($sp)
+     MEM_W(0X2C, ctx->r29) = ctx->r19;
+     // 0x0042AC14: addu        $s3, $a0, $zero
+@@ -1101,6 +1104,8 @@
+     // 0x0042AE24: addu        $a0, $s3, $a0
+     ctx->r4 = ADD32(ctx->r19, ctx->r4);
+     after_27:
++    fprintf(stderr, "[state:ac0c-sp] after 42CF90 sp=%08X expected=%08X\n",
++        (uint32_t)ctx->r29, trace_ac0c_sp);
+     // 0x0042AE28: lui         $a0, 0x1
+     ctx->r4 = S32(0X1 << 16);
+     // 0x0042AE2C: ori         $a0, $a0, 0x3B28
+@@ -1145,6 +1150,8 @@
+     // 0x0042AE5C: addu        $a0, $s3, $a0
+     ctx->r4 = ADD32(ctx->r19, ctx->r4);
+     after_31:
++    fprintf(stderr, "[state:ac0c-sp] after 42D120 sp=%08X expected=%08X\n",
++        (uint32_t)ctx->r29, trace_ac0c_sp);
+     // 0x0042AE60: lui         $a0, 0x800E
+     ctx->r4 = S32(0X800E << 16);
+     // 0x0042AE64: addiu       $a0, $a0, 0x6A90
+@@ -1653,6 +1660,8 @@
+     // 0x0042B0F8: addu        $a3, $s0, $zero
+     ctx->r7 = ADD32(ctx->r16, 0);
+     after_40:
++    fprintf(stderr, "[state:ac0c-sp] after 205D0C-40 sp=%08X expected=%08X\n",
++        (uint32_t)ctx->r29, trace_ac0c_sp);
+     // 0x0042B0FC: lw          $a0, 0x4C($s3)
+     ctx->r4 = MEM_W(ctx->r19, 0X4C);
+     // 0x0042B100: addu        $a1, $s0, $zero
+@@ -1775,6 +1784,7 @@
+     // 0x0042B1C4: addu        $a3, $s0, $zero
+     ctx->r7 = ADD32(ctx->r16, 0);
+     after_45:
++    fprintf(stderr, "[state:ac0c-sp] after 205D0C-45 sp=%08X expected=%08X\n", (uint32_t)ctx->r29, trace_ac0c_sp);
+     // 0x0042B1C8: sw          $v0, 0xA8($s3)
+     MEM_W(0XA8, ctx->r19) = ctx->r2;
+     // 0x0042B1CC: lw          $v0, 0x0($v0)
+@@ -1793,6 +1803,7 @@
+     // 0x0042B1E0: addu        $a0, $s3, $zero
+     ctx->r4 = ADD32(ctx->r19, 0);
+     after_46:
++    fprintf(stderr, "[state:ac0c-sp] after 42AA80 sp=%08X expected=%08X\n", (uint32_t)ctx->r29, trace_ac0c_sp);
+     // 0x0042B1E4: addu        $a0, $zero, $zero
+     ctx->r4 = ADD32(0, 0);
+     // 0x0042B1E8: addiu       $a2, $zero, 0x6
+@@ -1833,6 +1844,7 @@
+     // 0x0042B228: addu        $a3, $s0, $zero
+     ctx->r7 = ADD32(ctx->r16, 0);
+     after_47:
++    fprintf(stderr, "[state:ac0c-sp] after 205D0C-47 sp=%08X expected=%08X\n", (uint32_t)ctx->r29, trace_ac0c_sp);
+     // 0x0042B22C: addu        $a0, $zero, $zero
+     ctx->r4 = ADD32(0, 0);
+     // 0x0042B230: sw          $v0, 0xAC($s3)
+@@ -1889,6 +1901,7 @@
+     // 0x0042B290: addu        $a3, $s0, $zero
+     ctx->r7 = ADD32(ctx->r16, 0);
+     after_48:
++    fprintf(stderr, "[state:ac0c-sp] after 205D0C-48 sp=%08X expected=%08X\n", (uint32_t)ctx->r29, trace_ac0c_sp);
+     // 0x0042B294: addu        $a0, $s3, $zero
+     ctx->r4 = ADD32(ctx->r19, 0);
+     // 0x0042B298: sw          $v0, 0xB0($s3)
+@@ -1942,6 +1955,8 @@
+     // 0x0042B2E0: addu        $a0, $a0, $s0
+     ctx->r4 = ADD32(ctx->r4, ctx->r16);
+     after_50:
++    fprintf(stderr, "[state:ac0c-sp] after 21E5D4-50 sp=%08X expected=%08X\n",
++        (uint32_t)ctx->r29, trace_ac0c_sp);
+     // 0x0042B2E4: slt         $v0, $s1, $s4
+     ctx->r2 = SIGNED(ctx->r17) < SIGNED(ctx->r20) ? 1 : 0;
+     // 0x0042B2E8: bne         $v0, $zero, L_0042B2D4
+@@ -2001,6 +2016,7 @@
+     // 0x0042B320: addu        $a0, $s3, $zero
+     ctx->r4 = ADD32(ctx->r19, 0);
+     after_53:
++    fprintf(stderr, "[state:ac0c-sp] after 42C840 sp=%08X expected=%08X\n", (uint32_t)ctx->r29, trace_ac0c_sp);
+     // 0x0042B324: lw          $s4, 0xE8($s3)
+     ctx->r20 = MEM_W(ctx->r19, 0XE8);
+     // 0x0042B328: lw          $s1, 0xE4($s3)
+@@ -2073,6 +2089,7 @@
+     // 0x0042B384: sw          $v0, 0x0($s3)
+     MEM_W(0X0, ctx->r19) = ctx->r2;
+     after_56:
++    fprintf(stderr, "[state:ac0c-sp] after 42E894-56 sp=%08X expected=%08X\n", (uint32_t)ctx->r29, trace_ac0c_sp);
+     // 0x0042B388: addiu       $s0, $s1, 0x40
+     ctx->r16 = ADD32(ctx->r17, 0X40);
+     // 0x0042B38C: jal         0x0042FEEC
+@@ -2091,6 +2108,7 @@
+     // 0x0042B398: addu        $a0, $s0, $zero
+     ctx->r4 = ADD32(ctx->r16, 0);
+     after_58:
++    fprintf(stderr, "[state:ac0c-sp] after 27ECF0 sp=%08X expected=%08X\n", (uint32_t)ctx->r29, trace_ac0c_sp);
+     // 0x0042B39C: lbu         $v0, 0x1281($s1)
+     ctx->r2 = MEM_BU(ctx->r17, 0X1281);
+     // 0x0042B3A0: bne         $v0, $zero, L_0042B3BC
+@@ -2124,7 +2142,11 @@
+     // 0x0042B3C0: addu        $a0, $s3, $zero
+     ctx->r4 = ADD32(ctx->r19, 0);
+     after_59:
++    fprintf(stderr, "[state:ac0c-sp] after 42BF48 sp=%08X expected=%08X\n",
++        (uint32_t)ctx->r29, trace_ac0c_sp);
+ L_0042B3C4:
++    fprintf(stderr, "[state:ac0c-sp] epilogue sp=%08X expected=%08X\n",
++        (uint32_t)ctx->r29, trace_ac0c_sp);
+     // 0x0042B3C4: lw          $ra, 0x34($sp)
+     ctx->r31 = MEM_W(ctx->r29, 0X34);
+     // 0x0042B3C8: lw          $s4, 0x30($sp)
+@@ -2742,6 +2764,7 @@
+     // 0x0028648C: addiu       $a2, $zero, 0x2000
+     ctx->r6 = ADD32(0, 0X2000);
+     after_1:
++    fprintf(stderr, "[state:s3] after 266C5C %08X\n", (uint32_t)ctx->r19);
+     // 0x00286490: lui         $s1, 0x8012
+     ctx->r17 = S32(0X8012 << 16);
+     // 0x00286494: addiu       $s1, $s1, -0x5270
+@@ -2766,6 +2789,7 @@
+     // 0x002864B4: sw          $s0, 0x10($sp)
+     MEM_W(0X10, ctx->r29) = ctx->r16;
+     after_2:
++    fprintf(stderr, "[state:s3] after 28ADF0 %08X\n", (uint32_t)ctx->r19);
+     // 0x002864B8: addu        $a0, $s1, $zero
+     ctx->r4 = ADD32(ctx->r17, 0);
+     // 0x002864BC: lui         $a1, 0x8012
+@@ -2780,6 +2804,7 @@
+     // 0x002864C8: addu        $a2, $s2, $zero
+     ctx->r6 = ADD32(ctx->r18, 0);
+     after_3:
++    fprintf(stderr, "[state:s3] after 28AF00 %08X\n", (uint32_t)ctx->r19);
+     // 0x002864CC: addiu       $v0, $zero, -0x1
+     ctx->r2 = ADD32(0, -0X1);
+     // 0x002864D0: lui         $at, 0x2
+@@ -2796,6 +2821,7 @@
+     // 0x002864E0: addu        $a0, $s3, $zero
+     ctx->r4 = ADD32(ctx->r19, 0);
+     after_4:
++    fprintf(stderr, "[state:s3] after 28891C %08X\n", (uint32_t)ctx->r19);
+     // 0x002864E4: lui         $a0, 0x8012
+     ctx->r4 = S32(0X8012 << 16);
+     // 0x002864E8: addiu       $a0, $a0, -0x4F38
+@@ -2812,6 +2838,7 @@
+     // 0x002864F8: nop
+ 
+     after_5:
++    fprintf(stderr, "[state:s3] after 297AE0 %08X\n", (uint32_t)ctx->r19);
+     // 0x002864FC: lui         $v0, 0x8012
+     ctx->r2 = S32(0X8012 << 16);
+     // 0x00286500: lw          $v0, 0x690($v0)
+@@ -2846,6 +2873,7 @@
+     // 0x00286520: nop
+ 
+     after_7:
++    fprintf(stderr, "[state:s3] after 41BA50 %08X\n", (uint32_t)ctx->r19);
+     // 0x00286524: lui         $a0, 0x2
+     ctx->r4 = S32(0X2 << 16);
+ L_00286528:
+@@ -2859,6 +2887,7 @@
+     // 0x00286530: addu        $a0, $s3, $a0
+     ctx->r4 = ADD32(ctx->r19, ctx->r4);
+     after_8:
++    fprintf(stderr, "[state:s3] after 430500 %08X\n", (uint32_t)ctx->r19);
+     // 0x00286534: jal         0x002837E0
+     // 0x00286538: addu        $s1, $zero, $zero
+     ctx->r17 = ADD32(0, 0);
+@@ -2867,6 +2896,7 @@
+     // 0x00286538: addu        $s1, $zero, $zero
+     ctx->r17 = ADD32(0, 0);
+     after_9:
++    fprintf(stderr, "[state:s3] after 2837E0 %08X\n", (uint32_t)ctx->r19);
+     // 0x0028653C: jal         0x004302A0
+     // 0x00286540: nop
+ 
+@@ -2875,6 +2905,7 @@
+     // 0x00286540: nop
+ 
+     after_10:
++    fprintf(stderr, "[state:s3] after 4302A0 %08X\n", (uint32_t)ctx->r19);
+     // 0x00286544: lui         $a0, 0x2
+     ctx->r4 = S32(0X2 << 16);
+     // 0x00286548: ori         $a0, $a0, 0x3FAC
+@@ -2887,6 +2918,7 @@
+     // 0x00286550: addu        $a0, $s3, $a0
+     ctx->r4 = ADD32(ctx->r19, ctx->r4);
+     after_11:
++    fprintf(stderr, "[state:s3] after 42D1C0 %08X\n", (uint32_t)ctx->r19);
+     // 0x00286554: lui         $a0, 0x800C
+     ctx->r4 = S32(0X800C << 16);
+     // 0x00286558: lw          $a0, 0x2210($a0)
+@@ -2900,7 +2932,10 @@
+     // 0x00286568: addu        $at, $s3, $at
+     ctx->r1 = ADD32(ctx->r19, ctx->r1);
+     // 0x0028656C: sw          $zero, 0x3FF0($at)
++    fprintf(stderr, "[state:init-before] s3=%08X at=%08X value=%08X\n",
++        (uint32_t)ctx->r19, (uint32_t)ctx->r1, (uint32_t)MEM_W(0X3FF0, ctx->r1));
+     MEM_W(0X3FF0, ctx->r1) = 0;
++    fprintf(stderr, "[state:init-after] value=%08X\n", (uint32_t)MEM_W(0X3FF0, ctx->r1));
+     // 0x00286570: lui         $at, 0x2
+     ctx->r1 = S32(0X2 << 16);
+     // 0x00286574: addu        $at, $s3, $at
+--- a/RecompiledFuncs/funcs_57.c
++++ b/RecompiledFuncs/funcs_57.c
+@@ -1,5 +1,6 @@
+ #include "recomp.h"
+ #include "funcs.h"
++#include <stdio.h>
+ 
+ RECOMP_FUNC void func_0029D364(uint8_t* rdram, recomp_context* ctx) {
+     uint64_t hi = 0, lo = 0, result = 0;
+@@ -8158,8 +8159,10 @@
+ RECOMP_FUNC void func_0042BA40(uint8_t* rdram, recomp_context* ctx) {
+     uint64_t hi = 0, lo = 0, result = 0;
+     int c1cs = 0;
++    uint32_t trace_ba40_sp = 0;
+     // 0x0042BA40: addiu       $sp, $sp, -0xB0
+     ctx->r29 = ADD32(ctx->r29, -0XB0);
++    trace_ba40_sp = (uint32_t)ctx->r29;
+     // 0x0042BA44: sw          $a0, 0xB0($sp)
+     MEM_W(0XB0, ctx->r29) = ctx->r4;
+     // 0x0042BA48: sw          $a1, 0xB4($sp)
+@@ -8197,6 +8200,7 @@
+     // 0x0042BA80: addiu       $a1, $zero, 0x1
+     ctx->r5 = ADD32(0, 0X1);
+     after_0:
++    fprintf(stderr, "[ba40:0] sp=%08X expected=%08X\n", (uint32_t)ctx->r29, trace_ba40_sp);
+     // 0x0042BA84: beq         $v0, $zero, L_0042BF14
+     if (ctx->r2 == 0) {
+         // 0x0042BA88: nop
+@@ -8215,6 +8219,7 @@
+     // 0x0042BA94: addu        $a1, $zero, $zero
+     ctx->r5 = ADD32(0, 0);
+     after_1:
++    fprintf(stderr, "[ba40:1] sp=%08X expected=%08X\n", (uint32_t)ctx->r29, trace_ba40_sp);
+     // 0x0042BA98: lw          $t0, 0xB4($sp)
+     ctx->r8 = MEM_W(ctx->r29, 0XB4);
+     // 0x0042BA9C: lw          $v1, 0x0($t0)
+@@ -8247,6 +8252,7 @@
+     // 0x0042BACC: addiu       $a2, $a2, 0x8
+     ctx->r6 = ADD32(ctx->r6, 0X8);
+     after_2:
++    fprintf(stderr, "[ba40:2] sp=%08X expected=%08X\n", (uint32_t)ctx->r29, trace_ba40_sp);
+     // 0x0042BAD0: beq         $v0, $zero, L_0042BEFC
+     if (ctx->r2 == 0) {
+         // 0x0042BAD4: sw          $v0, 0x70($sp)
+@@ -8267,6 +8273,7 @@
+     // 0x0042BAE4: addiu       $a2, $zero, 0x1
+     ctx->r6 = ADD32(0, 0X1);
+     after_3:
++    fprintf(stderr, "[ba40:3] sp=%08X expected=%08X\n", (uint32_t)ctx->r29, trace_ba40_sp);
+     // 0x0042BAE8: lw          $t1, 0x70($sp)
+     ctx->r9 = MEM_W(ctx->r29, 0X70);
+     // 0x0042BAEC: lw          $v0, 0x0($t1)
+@@ -8319,6 +8326,7 @@
+     // 0x0042BB3C: addu        $a3, $t2, $a3
+     ctx->r7 = ADD32(ctx->r10, ctx->r7);
+     after_4:
++    fprintf(stderr, "[ba40:4] sp=%08X expected=%08X\n", (uint32_t)ctx->r29, trace_ba40_sp);
+     // 0x0042BB40: lw          $t3, 0xB0($sp)
+     ctx->r11 = MEM_W(ctx->r29, 0XB0);
+     // 0x0042BB44: lui         $at, 0x2
+@@ -8386,6 +8394,7 @@
+     // 0x0042BBA8: sw          $v0, 0x10($sp)
+     MEM_W(0X10, ctx->r29) = ctx->r2;
+     after_5:
++    fprintf(stderr, "[ba40:5] sp=%08X expected=%08X\n", (uint32_t)ctx->r29, trace_ba40_sp);
+     // 0x0042BBAC: sw          $v0, 0x74($sp)
+     MEM_W(0X74, ctx->r29) = ctx->r2;
+ L_0042BBB0:
+@@ -8426,6 +8435,7 @@
+     // 0x0042BBE4: addu        $s0, $v1, $zero
+     ctx->r16 = ADD32(ctx->r3, 0);
+     after_6:
++    fprintf(stderr, "[ba40:6] sp=%08X expected=%08X\n", (uint32_t)ctx->r29, trace_ba40_sp);
+     // 0x0042BBE8: addiu       $v1, $s0, 0x288
+     ctx->r3 = ADD32(ctx->r16, 0X288);
+     // 0x0042BBEC: sw          $v0, 0x14($s0)
+@@ -8482,6 +8492,7 @@
+     // 0x0042BC38: addu        $a3, $s3, $zero
+     ctx->r7 = ADD32(ctx->r19, 0);
+     after_7:
++    fprintf(stderr, "[ba40:7] sp=%08X expected=%08X\n", (uint32_t)ctx->r29, trace_ba40_sp);
+     // 0x0042BC3C: lhu         $a1, 0x22($s6)
+     ctx->r5 = MEM_HU(ctx->r22, 0X22);
+     // 0x0042BC40: lw          $a0, 0xB0($sp)
+@@ -8494,6 +8505,7 @@
+     // 0x0042BC48: addu        $s1, $s6, $zero
+     ctx->r17 = ADD32(ctx->r22, 0);
+     after_8:
++    fprintf(stderr, "[ba40:8] sp=%08X expected=%08X\n", (uint32_t)ctx->r29, trace_ba40_sp);
+     // 0x0042BC4C: lw          $v1, 0x0($v0)
+     ctx->r3 = MEM_W(ctx->r2, 0X0);
+     // 0x0042BC50: addiu       $v0, $zero, 0xB
+@@ -8569,6 +8581,7 @@
+     // 0x0042BCB8: addiu       $a1, $s6, 0x4
+     ctx->r5 = ADD32(ctx->r22, 0X4);
+     after_9:
++    fprintf(stderr, "[ba40:9] sp=%08X expected=%08X\n", (uint32_t)ctx->r29, trace_ba40_sp);
+     // 0x0042BCBC: lui         $v1, 0x8012
+     ctx->r3 = S32(0X8012 << 16);
+     // 0x0042BCC0: lw          $v1, -0x6788($v1)
+@@ -8624,6 +8637,7 @@
+     // 0x0042BD0C: sh          $v0, 0x20($s1)
+     MEM_H(0X20, ctx->r17) = ctx->r2;
+     after_10:
++    fprintf(stderr, "[ba40:10] sp=%08X expected=%08X\n", (uint32_t)ctx->r29, trace_ba40_sp);
+     // 0x0042BD10: lwc1        $f1, 0xC($s0)
+     ctx->f_odd[(1 - 1) * 2] = MEM_W(ctx->r16, 0XC);
+     // 0x0042BD14: c.lt.s      $f20, $f1
+@@ -8743,6 +8757,7 @@
+     // 0x0042BDB0: addu        $a3, $s3, $zero
+     ctx->r7 = ADD32(ctx->r19, 0);
+     after_11:
++    fprintf(stderr, "[ba40:11] sp=%08X expected=%08X\n", (uint32_t)ctx->r29, trace_ba40_sp);
+     // 0x0042BDB4: lui         $v0, 0x8012
+     ctx->r2 = S32(0X8012 << 16);
+     // 0x0042BDB8: lw          $v0, -0x6788($v0)
+@@ -8821,6 +8836,7 @@
+     // 0x0042BE24: sw          $zero, 0x1A8($s1)
+     MEM_W(0X1A8, ctx->r17) = 0;
+     after_12:
++    fprintf(stderr, "[ba40:12] sp=%08X expected=%08X\n", (uint32_t)ctx->r29, trace_ba40_sp);
+     // 0x0042BE28: beql        $v0, $zero, L_0042BEF0
+     if (ctx->r2 == 0) {
+         // 0x0042BE2C: addiu       $s3, $s3, 0x1
+@@ -8884,6 +8900,7 @@
+     // 0x0042BE78: addu        $a0, $s0, $zero
+     ctx->r4 = ADD32(ctx->r16, 0);
+     after_13:
++    fprintf(stderr, "[ba40:13] sp=%08X expected=%08X\n", (uint32_t)ctx->r29, trace_ba40_sp);
+     // 0x0042BE7C: beql        $v0, $zero, L_0042BEE0
+     if (ctx->r2 == 0) {
+         // 0x0042BE80: addiu       $s2, $s2, 0x1
+@@ -8930,6 +8947,7 @@
+     // 0x0042BEA8: addu        $a0, $s1, $zero
+     ctx->r4 = ADD32(ctx->r17, 0);
+     after_14:
++    fprintf(stderr, "[ba40:14] sp=%08X expected=%08X\n", (uint32_t)ctx->r29, trace_ba40_sp);
+     // 0x0042BEAC: c.lt.s      $f0, $f20
+     CHECK_FR(ctx, 0);
+     CHECK_FR(ctx, 20);
+@@ -8967,6 +8985,7 @@
+     // 0x0042BED4: addu        $a0, $s1, $zero
+     ctx->r4 = ADD32(ctx->r17, 0);
+     after_15:
++    fprintf(stderr, "[ba40:15] sp=%08X expected=%08X\n", (uint32_t)ctx->r29, trace_ba40_sp);
+ L_0042BED8:
+     // 0x0042BED8: mov.s       $f20, $f0
+     CHECK_FR(ctx, 20);
+@@ -9012,6 +9031,7 @@
+     // 0x0042BF08: addu        $a0, $zero, $zero
+     ctx->r4 = ADD32(0, 0);
+     after_16:
++    fprintf(stderr, "[ba40:16] sp=%08X expected=%08X\n", (uint32_t)ctx->r29, trace_ba40_sp);
+     // 0x0042BF0C: lw          $t2, 0xB0($sp)
+     ctx->r10 = MEM_W(ctx->r29, 0XB0);
+     // 0x0042BF10: sw          $zero, 0xF00($t2)
+--- a/RecompiledFuncs/funcs_87.c
++++ b/RecompiledFuncs/funcs_87.c
+@@ -1,5 +1,6 @@
+ #include "recomp.h"
+ #include "funcs.h"
++#include <stdio.h>
+ 
+ RECOMP_FUNC void func_002898A4(uint8_t* rdram, recomp_context* ctx) {
+     uint64_t hi = 0, lo = 0, result = 0;
+@@ -2479,6 +2480,7 @@
+     // 0x00286778: addu        $a0, $s2, $zero
+     ctx->r4 = ADD32(ctx->r18, 0);
+     after_8:
++    fprintf(stderr, "[state:s2] after 286440 %08X\n", (uint32_t)ctx->r18);
+     // 0x0028677C: lui         $v0, 0x800C
+     ctx->r2 = S32(0X800C << 16);
+     // 0x00286780: lw          $v0, 0x2210($v0)
+@@ -2551,6 +2553,7 @@
+     // 0x002867E4: addu        $a0, $s1, $zero
+     ctx->r4 = ADD32(ctx->r17, 0);
+     after_10:
++    fprintf(stderr, "[state:s2] after 42FE4C %08X\n", (uint32_t)ctx->r18);
+     // 0x002867E8: lui         $s0, 0x2
+     ctx->r16 = S32(0X2 << 16);
+     // 0x002867EC: ori         $s0, $s0, 0x2BC0
+@@ -2565,6 +2568,7 @@
+     // 0x002867F8: addu        $a0, $s0, $zero
+     ctx->r4 = ADD32(ctx->r16, 0);
+     after_11:
++    fprintf(stderr, "[state:s2] after 42E834 %08X\n", (uint32_t)ctx->r18);
+     // 0x002867FC: jal         0x00241860
+     // 0x00286800: nop
+ 
+@@ -2573,6 +2577,7 @@
+     // 0x00286800: nop
+ 
+     after_12:
++    fprintf(stderr, "[state:s2] after 241860 %08X\n", (uint32_t)ctx->r18);
+     // 0x00286804: lui         $v0, 0xFC
+     ctx->r2 = S32(0XFC << 16);
+     // 0x00286808: ori         $v0, $v0, 0xBFB4
+@@ -2589,6 +2594,7 @@
+     // 0x00286818: sw          $v0, 0x3C4($s2)
+     MEM_W(0X3C4, ctx->r18) = ctx->r2;
+     after_13:
++    fprintf(stderr, "[state:s2] after 42FBA4 %08X\n", (uint32_t)ctx->r18);
+     // 0x0028681C: addu        $a0, $s0, $zero
+     ctx->r4 = ADD32(ctx->r16, 0);
+     // 0x00286820: addu        $a1, $zero, $zero
+@@ -2601,6 +2607,7 @@
+     // 0x00286828: addu        $a2, $a1, $zero
+     ctx->r6 = ADD32(ctx->r5, 0);
+     after_14:
++    fprintf(stderr, "[state:s2] after 42E5AC %08X\n", (uint32_t)ctx->r18);
+     // 0x0028682C: lw          $a1, 0x3C4($s2)
+     ctx->r5 = MEM_W(ctx->r18, 0X3C4);
+     // 0x00286830: lui         $a0, 0x800F
+@@ -2615,6 +2622,7 @@
+     // 0x0028683C: nop
+ 
+     after_15:
++    fprintf(stderr, "[state:s2] after 429FA0 %08X\n", (uint32_t)ctx->r18);
+     // 0x00286840: lui         $v0, 0x800B
+     ctx->r2 = S32(0X800B << 16);
+     // 0x00286844: lbu         $v0, 0x6CF1($v0)
+@@ -2650,6 +2658,7 @@
+     // 0x00286864: addu        $a0, $s2, $a0
+     ctx->r4 = ADD32(ctx->r18, ctx->r4);
+     after_17:
++    fprintf(stderr, "[state:s2] after 42EB50 %08X\n", (uint32_t)ctx->r18);
+     // 0x00286868: jal         0x004263DC
+     // 0x0028686C: nop
+ 
+@@ -2658,6 +2667,7 @@
+     // 0x0028686C: nop
+ 
+     after_18:
++    fprintf(stderr, "[state:s2] after 4263DC %08X\n", (uint32_t)ctx->r18);
+     // 0x00286870: lui         $at, 0x800B
+     ctx->r1 = S32(0X800B << 16);
+     // 0x00286874: lwc1        $f0, -0x629C($at)
+@@ -2696,6 +2706,7 @@
+     // 0x002868B0: nop
+ 
+     after_19:
++    fprintf(stderr, "[state:s2] after 285A94 %08X\n", (uint32_t)ctx->r18);
+     // 0x002868B4: jal         0x0028D0E0
+     // 0x002868B8: nop
+ 
+@@ -2704,6 +2715,7 @@
+     // 0x002868B8: nop
+ 
+     after_20:
++    fprintf(stderr, "[state:s2] after 28D0E0 %08X\n", (uint32_t)ctx->r18);
+     // 0x002868BC: beq         $v0, $zero, L_002868CC
+     if (ctx->r2 == 0) {
+         // 0x002868C0: addu        $a0, $s2, $zero
+@@ -2730,6 +2742,7 @@
+     // 0x002868D4: addiu       $s0, $zero, 0x1
+     ctx->r16 = ADD32(0, 0X1);
+     after_21:
++    fprintf(stderr, "[state:s2] after 288BC8 %08X\n", (uint32_t)ctx->r18);
+ L_002868D8:
+     // 0x002868D8: lui         $a0, 0x8012
+     ctx->r4 = S32(0X8012 << 16);

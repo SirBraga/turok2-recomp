@@ -1,0 +1,82 @@
+# ROM dumps — never commit
+baserom*.z64
+baserom*.n64
+baserom*.v64
+*.z64
+*.n64
+*.v64
+
+# Build artifacts
+build/
+*.o
+*.a
+*.elf
+*.bin
+*.map
+
+# Splat outputs (regenerated from baserom). Anchored at repo root so
+# we don't accidentally ignore src/us/, include/us/, etc.
+.splat_cache
+
+# Extracted microcode blobs (regenerable from baserom)
+ucode/
+/us/
+/eu/
+/jp/
+/us/asm/
+/us/assets/
+/us/bin/
+
+# Tool caches
+__pycache__/
+*.pyc
+.venv/
+
+# External reference repos (cloned locally, not part of this project)
+references/
+
+# Vendored toolchain & headers — populated locally by
+# scripts/setup-from-references.sh from references/. Third-party origin,
+# not under our license.
+tools/sn64/
+tools/psyq-obj-parser
+tools/n64crc
+include/types/
+include/libtengine/
+
+# Generated symbol seeds (derived from third-party functions.csv)
+versions/functions.csv.libtengine
+versions/symbol_addrs.us.txt
+versions/undefined_funcs_auto.us.txt
+versions/undefined_syms_auto.us.txt
+versions/symbols_from_lnk.us.txt
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# Seeds recuperados del ROM por tools/function_seed.py (regenerables en segundos)
+versions/symbols_from_scan.us.txt
+versions/*.libtengine-bak
+versions/undefined_funcs_extra.us.txt
+
+# Instrucciones de workspace para Claude Code — locales, no se publican
+CLAUDE.md
+RecompiledFuncs/
+turok2.us.toml.local
+
+# Claude Code workspace state — never publish
+.claude/
+
+# qemu-x86_64 dumps these when it crashes emulating the amd64 build image
+core
+core.*
+
+# Local screen captures (Adon/Primagen flicker, crash repro)
+captures/
+
+# RT64 texture dumps (ROM hashes — do not commit or redistribute)
+build-native/runtime-data/texture-dumps/
+texture-dumps/

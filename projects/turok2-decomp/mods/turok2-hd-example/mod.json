@@ -1,0 +1,23 @@
+{
+    "game_id": "turok2",
+    "id": "turok2-hd-example",
+    "display_name": "Turok 2 HD textures (example)",
+    "description": "Empty RT64 texture pack skeleton. Dump hashes locally, add DDS BC7 + mipmaps, and do not commit ROM textures.",
+    "short_description": "Empty texture pack skeleton for local DDS replacements.",
+    "version": "0.1.0",
+    "authors": ["Turok 2 Recompiled"],
+    "minimum_recomp_version": "0.1.0",
+    "enabled_by_default": false,
+    "config_schema": {
+        "options": [
+            {
+                "id": "_recomp_texture_pack_enabled",
+                "name": "HD textures",
+                "description": "Enable this pack's texture replacements when the mod is on.",
+                "type": "Enum",
+                "options": ["Disabled", "Enabled"],
+                "default": "Disabled"
+            }
+        ]
+    }
+}

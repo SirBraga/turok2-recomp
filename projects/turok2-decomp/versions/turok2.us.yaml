@@ -1,0 +1,400 @@
+name: Turok 2 - Seeds of Evil
+sha1: fb0400f21e3f043939ab56500c7b12a3231006f1
+
+options:
+  basename: turok2
+  base_path: ../us
+  target_path: ../baserom.us.z64
+  src_path: ../src/us
+  asm_path: ../us/asm
+  symbol_addrs_path:
+    - ../versions/symbol_addrs.us.txt
+    - ../versions/symbols_from_scan.us.txt
+  undefined_funcs_auto_path: ../versions/undefined_funcs_auto.us.txt
+  undefined_syms_auto_path: ../versions/undefined_syms_auto.us.txt
+
+  compiler: SN64
+  platform: n64
+  # This ROM packs several code/data boundaries at non-16-byte addresses.
+  # Preserve the exact ROM layout instead of letting splat's linker script
+  # insert padding between input sections.
+  subalign: 1
+  find_file_boundaries: True
+  use_legacy_include_asm: False
+  generated_c_preamble: "#include \"include_asm.h\""
+  generated_s_preamble: ".set fp=64"
+
+# ROM layout (see docs/SEGMENTS.md and docs/MICROCODE.md for the full
+# investigation). Combines two parallel analyses:
+#   - segment refinement based on function-prologue density + opcode
+#     shape scans + SN64 LNK record signatures
+#   - RSP microcode location via libultra SDK signature strings
+#
+#   0x0000   - 0x0040   : ROM header
+#   0x0040   - 0x1000   : IPL3 / boot
+#   0x1000   - 0x1100   : SN64 entry stub (engine .text begins after)
+#   0x1100   - 0xA5FD8  : engine .text (game logic + classes)
+#   0xA5FD8  - 0xBDF2C  : engine .rodata (type-registry strings, jump tables)
+#   0xBDF2C  - 0xC0950  : RSP microcode region (rspboot + aspMain + F3DEX)
+#   0xC0950  - 0xC2ED8  : engine .rodata tail
+#   0xC2ED8  - 0xC3074  : 3 trailing engine functions (pass 3 prologue scan)
+#   0xC3074  - 0xC8A60  : libaudio .text (no COP0 ops; float DSP)
+#   0xC8A60  - 0xDEDE0  : libultra OS .text (threads, exceptions, gu math)
+#   0xDEDE0  - 0xF6F2C  : libultra .rodata + audio sample tables
+#   0xF6F2C  - 0xF7F50  : duplicate ucode copy used by IPL3
+#   0xF7F50  - 0x107000 : libultra .sdata/.data tail
+#   0x107000 - 0x13B5F0 : SN64 LNK source-debug section (paths, line info)
+#   0x13B5F0 - 0x17A600 : virtual_text_0 (VM module 1 .text)
+#   0x17A600 - 0x186000 : virtual_rodata_0
+#   0x186000 - 0x1B3400 : virtual_text_1 (VM module 2 .text)
+#   0x1B3400 - 0x1BFA00 : virtual_rodata_1
+#   0x1BFA00 - 0x1DEE00 : virtual_text_2 (VM module 3 .text)
+#   0x1DEE00 - 0x20E334 : virtual_rodata_2 / .sdata
+#   0x20E334 - 0x20F178 : assets_index (913 x uint32 offset table)
+#   0x20F178 - 0x1FF7AEC: compressed assets (textures, audio, levels)
+#   0x1FF7AEC- 0x2000000: 0xFF trailer (ROM padding)
+segments:
+  - name: header
+    type: header
+    start: 0x0
+
+  - name: boot
+    type: bin
+    start: 0x40
+
+  - name: main
+    type: code
+    align: 1
+    start: 0x1000
+    vram: 0x80000400
+    subsegments:
+      # SN64 entry stub — wired via hasm so the splat-emitted asm is
+      # replaced by the hand-written src/us/asm/boot.s (byte-exact).
+      # `base_path` is ../us, hence the ../ prefix.
+      - [0x1000, hasm, ../src/us/asm/boot]
+
+  # VRAM corregido en el pass 6. Era 0x80000500, heredado de suponer que el
+  # engine se carga contiguo tras el stub de entrada. La evidencia dice que no:
+  # de las 15,680 instrucciones `jal` del area de codigo, 14,208 apuntan a
+  # 0x802xxxxx y exactamente UNA a 0x800xxxxx. Mapeando esos targets con
+  # delta 0x801FF400 (o sea ROM 0x1100 -> VRAM 0x80200500), el 65.6% cae
+  # exactamente sobre un prologo `addiu sp,sp,-X`; con el VRAM anterior cae
+  # el 0.0%, contra una tasa base de ~1% por azar.
+  # El stub SN64 de 0x1000 es el que hace el DMA a este banco.
+  - name: code
+    type: code
+    align: 1
+    start: 0x1100
+    vram: 0x00200500     # useg: el codigo corre mapeado por TLB
+    subsegments:
+      - [0x1100, asm]
+      - [0x1F100, asm]
+      - [0x438B0, asm]
+
+  # El .rodata NO es useg: se linkea directo desde 0x80000400 en KSEG0, igual
+  # que en Turok 3 (`code_data`, "linked mapped to 0x80000400"). Por eso vive
+  # en su propio segmento — splat solo admite un vram por segmento.
+  # Lo confirman 2,652 referencias sin resolver en el bloque 0x800A.
+  #
+  # Start moved back 0x1E0 from 0xA5FD8. The recompiler located it: it needs a
+  # jump table at 0x800A51F8, for the `jr` at 0x00206CC4, and could not size it
+  # because the address fell outside every rodata section. Checking the bytes
+  # settles which side of the boundary they are on:
+  #
+  #   0xA5C18-0xA5DF8   0/120 words are valid code addresses  -> instructions
+  #   0xA5DF8-0xA5FD8   100/120                               -> jump tables
+  #   0xA5FD8           "simple object index", "geometry"     -> strings
+  #
+  # and the table opens on 0x00206CCC, the instruction after the `jr` that
+  # reads it. So rodata starts with its jump tables and the string pool follows.
+  - name: code_rodata
+    type: code
+    align: 1
+    start: 0xA5DF8
+    vram: 0x800A51F8     # 0xA5DF8 + 0x7FFFF400
+    subsegments:
+      - [0xA5DF8, rodata]
+
+  # ---------------------------------------------------------------------------
+  # RSP microcode blobs. Do NOT disassemble as MIPS — see docs/MICROCODE.md.
+  #
+  # Three reasons these must stay `bin`, in increasing order of consequence:
+  #   1. This is RSP code, not CPU code. Its COP2 vector encodings do not
+  #      disassemble meaningfully as plain MIPS.
+  #   2. N64Recomp statically recompiles CPU code only. The graphics ucode is
+  #      never executed by the recompiled CPU: RT64 interprets the display list
+  #      through its HLE GBI layer, and aspMain goes through N64ModernRuntime.
+  #   3. RT64 *identifies* the ucode by hashing its text and data segments as
+  #      they sit in RDRAM. Any byte change breaks that lookup, and a failed
+  #      lookup silently degrades to the RDP-only command subset. Keeping the
+  #      blobs byte-exact is therefore load-bearing, which is also why this
+  #      file sets subalign/align to 1.
+  #
+  # The ROM signature reads "F3DEX.NoN fifo 2.05", but the version number, not
+  # the name, identifies the GBI generation: 2.xx is the F3DEX2 family. This is
+  # also an Acclaim rebuild, not the stock SDK blob, so its hash had to be added
+  # to RT64's GBI database. An earlier version of this comment claimed "stock
+  # libultra" and "RT64's existing F3DEX handler" — both wrong. Verified live:
+  # RT64 reports `matched "F3DEX2.NoN.fifo 2.05 (Acclaim)" ucode=7`.
+  # ---------------------------------------------------------------------------
+  - name: rspbootText
+    type: bin
+    start: 0xBDF2C
+    vram: 0x800BD32C     # ROM-derived; without it splat packs the
+                         # blob after the previous section and the
+                         # drift overlaps its neighbour.
+    vram: 0x800BD32C        # size 0xD4 — standard libultra rspboot
+  - name: aspMainText
+    type: bin
+    start: 0xBE000
+    vram: 0x800BD400     # ROM-derived; without it splat packs the
+                         # blob after the previous section and the
+                         # drift overlaps its neighbour.
+    vram: 0x800BD400        # size 0xEE0 — N64 SDK aspMain audio ucode
+  - name: gspF3DEX_NoN_fifoText
+    type: bin
+    start: 0xBF2BC
+    vram: 0x800BE6BC     # ROM-derived; without it splat packs the
+                         # blob after the previous section and the
+                         # drift overlaps its neighbour.
+    vram: 0x800BE6BC        # size 0x107C — F3DEX.NoN fifo 2.05 graphics text
+  - name: gfx_ucode_data
+    type: bin
+    start: 0xC0400
+    vram: 0x800BF800     # ROM-derived; without it splat packs the
+                         # blob after the previous section and the
+                         # drift overlaps its neighbour.
+    vram: 0x800BF800        # F3DEX data + L3DEX text/data follow until ~0xC0950
+
+  # Engine .rodata continuation, with 3 trailing engine functions tucked
+  # between the rodata block and libultra .text. Pass 3 surfaced these via
+  # prologue scan (`27bdXXXX` with negative imm): 0xC2ED8, 0xC2F2C, 0xC2FE0.
+  - name: code_rodata_tail
+    type: code
+    align: 1
+    start: 0xC0950
+    vram: 0x800BFD50     # KSEG0: datos, no useg (0xC0950 + 0x7FFFF400)
+    subsegments:
+      - [0xC0950, rodata]
+
+  # Same split, same reason, and this one is what stopped the recompiler.
+  #
+  # These three functions used to be a subsegment of code_rodata_tail. splat
+  # emits text before data, so 0xC3074-0xC2ED8 = 0x19C bytes of code, aligned
+  # to 0x1A0, were placed ahead of the rodata pool and pushed every jump table
+  # in it 0x1A0 higher in the ELF. The recompiler then read the table for
+  # `jr v0` at 0x00446680 from 0x800C1148 and found 5A000000 59000000 ... --
+  # a descending ramp, not addresses -- and gave up with "Failed to determine
+  # size of jump table". The real table sits 0x1A0 below, and its entries
+  # 0x419128 0x419138 0x419148 0x419158 are exactly that switch's case bodies,
+  # 0x10 apart.
+  # useg, not KSEG0. These are engine functions, and the engine runs TLB-mapped,
+  # so the top nibble of every `jal` they issue comes from a useg PC. Given
+  # KSEG0 their five calls resolved 0/5 -- each one landing on 0x802xxxxx, an
+  # address no section covers -- and the harvested absolute symbols papered over
+  # it by defining phantom aliases like `func_802888BC` next to the real
+  # `func_002888BC`, which N64Recomp then could not resolve. In useg all five
+  # land in a section and three sit on a function boundary.
+  - name: code_tail_funcs
+    type: code
+    align: 1
+    start: 0xC2ED8
+    vram: 0x002C22D8     # useg; 0x200500 + (0xC2ED8 - 0x1100)
+    subsegments:
+      - [0xC2ED8, asm]              # 3 last engine funcs (ends @ 0xC3074)
+
+  # libultra block, refined in pass 3 via libultra-signature scan:
+  #   * .text starts at 0xC3074 (first true `addiu sp, sp, -X` prologue;
+  #     previous 0xC3000 cut mid-engine-function).
+  #   * libaudio occupies 0xC3074..0xC8A60 (no COP0 ops; pure float DSP).
+  #   * libultra OS core starts at 0xC8A60 (first mtc0/mfc0 of the segment;
+  #     thread / exception / interrupt handlers).
+  #   * libultra `gu*` math block clusters around 0xD1000 (238 lwc1/swc1
+  #     per 4 KB, vs <40 elsewhere) — kept inside the OS subsegment for now.
+  #   * .text really ends at 0xDEDE0 (jr-ra of __osDispatchThread-like
+  #     routine at 0xDEDD8 then string `header\0ESTRUCTIB\0texture\0`).
+  #     Previous boundary 0xDC000 was 0x2DE0 too early — that region is
+  #     still libultra interrupt/exception code (mtc0+eret patterns).
+  #   * .rodata + audio/jump-table data spans 0xDEDE0..end of segment.
+  - name: libultra
+    type: code
+    align: 1
+    start: 0xC3074
+    vram: 0x800C2474     # KSEG0: libultra corre SIN mapear — trae los vectores de
+                         # excepcion y el handler de TLB miss. El valor original era correcto.
+    subsegments:
+      # This whole block is a DEAD duplicate of the libultra that is linked
+      # into the engine image at ROM 0x08AAA0. Measured over every j/jal in
+      # the ROM: the copy inside `code` receives 4,699 calls to 1,208 distinct
+      # targets, this one receives zero. Disassembling it as code produced
+      # ~114 KB of functions nothing can reach, and it is why os_text_* decoded
+      # so badly. Its data is still referenced, so only the text becomes bin.
+      - [0xC3074, bin]
+      - [0xDEDE0, data, os_rodata]            # libultra .rodata + jump tables
+
+  # Duplicate ucode copy used by the IPL3/boot path. Mirrors the
+  # 0xBDF2C..0xC094E region byte-for-byte.
+  - name: ucode_copy2
+    type: bin
+    start: 0xF6F2C
+    vram: 0x800F632C     # ROM-derived; without it splat packs the
+                         # blob after the previous section and the
+                         # drift overlaps its neighbour.
+    vram: 0x800F632C        # ends ~0xF7F50
+
+  - name: libultra_tail
+    type: code
+    align: 1
+    start: 0xF7F50
+    vram: 0x800F7350     # KSEG0: datos (0xF7F50 + 0x7FFFF400)
+    subsegments:
+      # libultra .sdata/.data tail (pointer-heavy initializer region).
+      - [0xF7F50, data]
+
+  # SN64 LNK source-debug section (paths, line numbers, symbol tables).
+  # Not code, not data — pure linker metadata. Identified by literal
+  # `4c 4e 4b 02` markers throughout, and `D:\turok2\n64\source\...`
+  # path strings.
+  - name: lnk_debug
+    type: bin
+    start: 0x107000
+
+  # Virtual / VM-hosted code (T3-equivalent of the `virtual` segment).
+  # Hot-loaded engine code that gets relocated by VMASM.S at runtime.
+  # PROVISIONAL. The old 0x8013AAF0 collided with `code` once that moved to
+  # 0x80200500 (duplicate symbol definitions at 0x8020D5xx), so it had to move.
+  #
+  # This value is the best-supported guess, not a confirmed mapping. Delta
+  # voting over the 370 `jal` targets in 0x80400000-0x80430B20 favours
+  # 0x802B6000 at 45.9% (chance is ~1%), which maps ROM 0x14A000 -> 0x80400000
+  # and implies 0x803F15F0 at this segment's start. Runner-up scored 38.6%, so
+  # the margin is thin.
+  #
+  # These modules are TLB-paged by VMASM.S/VMEMORY.C, not statically resident,
+  # so a single splat vram cannot be right for all of them anyway — see #23 and
+  # #13 (hand them to N64Recomp as relocatable sections).
+  # El tramo 0x13B5F0-0x14A000 NO es este modulo: su densidad de prologos es
+  # 7.2/4KB contra los 12.4 del codigo sano, o sea contenido mixto. Se aisla
+  # como bin hasta saber que es, para que no se decodifique como codigo.
+  - name: pre_virtual
+    type: bin
+    start: 0x13B5F0
+
+  - name: virtual
+    type: code
+    align: 1
+    start: 0x14A000
+    vram: 0x00400000     # useg, igual que el `virtual` de Turok 3.
+                         # Delta 0x2B6000 gana el barrido: 170/364 targets caen
+                         # sobre un prologo (46.7% contra ~1% de azar), y 147 de
+                         # esos vienen precedidos de `jr ra`, o sea inicios de
+                         # funcion reales. ROM 0x14A000 abre con 27BDFFE8.
+    subsegments:
+      # Two VM modules separated by a .rodata pool. Both are sound at this base:
+      # scored by how often their `jal`s land on a function boundary, they hit
+      # 94.8% and 79.5% against the engine's own 88.0% and ~1.2% chance.
+      # The third module is not one of these — see vm_overlay_2 below.
+      - [0x14A000, asm,  virtual_text_0]
+      - [0x17A600, data, virtual_rodata_0]
+
+  # Split from `virtual` rather than left as two more subsegments of it.
+  #
+  # splat's linker script groups a segment's inputs by type -- every `.text`
+  # first, between virtual_TEXT_START and virtual_TEXT_END, then every `.data`.
+  # That is right for a segment laid out text-then-data and wrong here, because
+  # this ROM interleaves them: text_0, rodata_0, text_1, rodata_1. Grouping
+  # emitted text_0, text_1, rodata_0, rodata_1, so everything after the first
+  # rodata pool sat at the wrong address in the ELF -- virtual_text_1 landed at
+  # 0x430600 while every seed and symbol named it 0x43C000, 0xBA00 away.
+  #
+  # Measured against the ROM at the declared mapping, before the split:
+  #
+  #     virtual_text_0     96.1%      virtual_rodata_0    0.9%
+  #     virtual_text_1      0.6%      virtual_rodata_1   99.0%
+  #
+  # and at the grouped order, 96.1 / 96.1 / 98.2 / 99.0 -- the residual being
+  # relocations, which resolve differently once the addresses move.
+  #
+  # One segment per text/rodata pair keeps each pair in ROM order, since within
+  # a pair text does come first. See #39.
+  - name: virtual_1
+    type: code
+    align: 1
+    start: 0x186000
+    vram: 0x0043C000     # 0x400000 + (0x186000 - 0x14A000)
+    subsegments:
+      - [0x186000, asm,  virtual_text_1]
+      - [0x1B3400, data, virtual_rodata_1]
+
+  # Not a third VM module: a second, differently-linked copy of the engine's
+  # top 128 KB. 59.6% of its words are byte-identical to ROM 0x84D40 onwards
+  # with no identical run reaching 1 KB, which is relocated code — same
+  # instructions, different addresses. Of the 12,940 words that do differ, the
+  # ones that are `jal` on both sides differ by a single value: +0x330 in the
+  # 26-bit field, +0xCC0 of target address, in 94.8% of cases.
+  #
+  # ROM 0x1BFA00 corresponds to engine ROM 0x84D40, i.e. vram 0x00284140.
+  # Adding the 0xCC0 its own calls carry gives 0x00284E00, where 82.0% of them
+  # resolve to a function boundary — against 1.7% at 0x00284140 and 0% at the
+  # 0x00475A00 the linear layout used to give it.
+  #
+  # That base overlaps `code`, so this is a real overlay: a paged copy that
+  # replaces engine code at runtime, which is what VMEMORY.C / VMASM.S describe.
+  #
+  # splat cannot express it. Declaring it with `exclusive_ram_id` is rejected:
+  #
+  #   Overlay segment vm_overlay_2 with vram range ([0x00284E00, 0x002A4200])
+  #   overlaps with the global vram range ([0x00200500, 0x80106400])
+  #
+  # splat requires overlays to sit outside the interval spanned by the global
+  # segments, and this ROM's mixed model — engine TLB-mapped in useg, libultra
+  # and the data segments direct in KSEG0 — stretches that interval across
+  # nearly the whole address space, so no overlay address can be outside it.
+  # Marking `code` exclusive too would shrink the interval, but that rewrites
+  # the symbol scope of the entire engine to gain a second disassembly of code
+  # the ROM already carries.
+  #
+  # So it stays `bin`. Nothing is lost: this is a copy, and the original is at
+  # ROM 0x84D40 inside `code`, mapped correctly and already disassembled. What
+  # the copy contributed was 1,596 `jal`s resolving against a base 0x1F1B00
+  # from where its code was linked — noise, and the reason the recompiler
+  # aborted on func_0048CE6C. Removing the TLB copy is also what the recomp
+  # path wants: N64ModernRuntime does not page, so the engine's own copy is the
+  # one that runs.
+  #
+  # Same conclusion as #31 reached for the libultra text. Revisit if splat
+  # gains overlay support that does not require a contiguous global range.
+  - name: vm_dup_engine
+    type: bin
+    start: 0x1BFA00
+
+  # Left at the address the old linear layout gave it. If this pool belongs to
+  # the copy above it is misplaced, but moving both at once would make the
+  # effect of either impossible to attribute.
+  - name: virtual_tail
+    type: code
+    align: 1
+    start: 0x1DEE00
+    vram: 0x00494E00
+    subsegments:
+      - [0x1DEE00, data, virtual_rodata_2]
+
+  # 913-entry uint32 BE monotonic offset table (assets directory).
+  # Discovered in pass 4: it actually starts 0xCCC bytes earlier than
+  # 0x20F000 was claiming. Ends at 0x20F178.
+  - name: assets_index
+    type: bin
+    start: 0x20E334
+
+  # Compressed asset/level/audio/texture data. Treated as binary until
+  # the cartridge index is decoded.
+  - name: assets
+    type: bin
+    start: 0x20F178
+
+  # Final 0xFF trailer (ROM padding). Last non-FF byte at 0x1FF7AEB.
+  - name: trailer
+    type: bin
+    start: 0x1FF7AEC
+
+  - [0x2000000]

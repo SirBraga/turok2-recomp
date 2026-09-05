@@ -1,0 +1,4 @@
+/* Turok 2 bring-up theme. RecompFrontend supplies the base component styles. */
+body {
+    font-family: "LatoLatin";
+}

@@ -1,0 +1,10 @@
+text_offset = 0x0
+text_size = 0xD4
+text_address = 0x04001000
+rom_file_path = "us/assets/ucode_copy2.bin"
+output_file_path = "rsp/rspboot.cpp"
+output_function_name = "rspboot"
+
+extra_indirect_branch_targets = [
+    0x1FC8, 0x1FD8,
+]

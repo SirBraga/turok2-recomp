@@ -1,0 +1,77 @@
+name: Windows
+
+# Produces a ready-to-run Windows build of Turok 2: Recompiled.
+# Run it from the Actions tab (workflow_dispatch) or let it fire on a push.
+on:
+  push:
+    branches: [main, master]
+    paths-ignore:
+      - '**.md'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    # The recompiled C is roughly a thousand translation units, so a cold MSVC
+    # build is long. The default 360 minute cap is not enough headroom to rely on.
+    timeout-minutes: 300
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # The dependencies under tools/ are vendored directly rather than
+          # registered as submodules, because the port carries local changes to
+          # N64ModernRuntime and RecompFrontend that upstream does not have.
+          fetch-depth: 1
+
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Set up CMake and Ninja
+        uses: lukka/get-cmake@latest
+
+      # Speeds up repeat runs a lot; the first run populates it.
+      - name: Compiler cache
+        uses: hendrikmuhs/ccache-action@v1
+        with:
+          variant: sccache
+          key: turok2-windows
+
+      - name: Configure
+        run: >
+          cmake -S projects/turok2-decomp -B build-win -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DTUROK2_BUILD_APP=ON
+          -DCMAKE_C_COMPILER_LAUNCHER=sccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+
+      - name: Build
+        run: cmake --build build-win --target Turok2Recompiled
+
+      - name: Stage release folder
+        shell: pwsh
+        run: |
+          $dist = "dist/Turok2Recompiled"
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+          Copy-Item "build-win/Turok2Recompiled.exe" $dist
+          Copy-Item "build-win/*.dll" $dist -ErrorAction SilentlyContinue
+          Copy-Item "build-win/assets" $dist -Recurse
+          # The ROM is not shipped. The launcher asks for it on first run and
+          # stores it in the per-user application folder from then on.
+          @"
+          Turok 2: Recompiled
+
+          Run Turok2Recompiled.exe and pick your Turok 2 (USA) ROM when the
+          launcher asks for it. It is remembered after the first time.
+          "@ | Set-Content "$dist/LEIAME.txt"
+
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: Turok2Recompiled-windows-x64
+          path: dist/
+          if-no-files-found: error

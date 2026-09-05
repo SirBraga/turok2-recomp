@@ -1,0 +1,52 @@
+# Build trees
+build/
+build-app/
+build-native/
+build-win/
+dist/
+cmake-build-*/
+**/CMakeFiles/
+**/CMakeCache.txt
+compile_commands.json
+
+# Snapshots of the recompiler output. Only RecompiledFuncs/ is the real source.
+RecompiledFuncs.bak.*/
+RecompiledFuncs-antes-merge.tar.gz
+*.tar.gz
+
+# Reference ports and the abandoned fallback project. Useful locally for
+# comparison, far too large to carry in the repository.
+references/
+projects/*/references/
+projects/turok2-decomp-mips-fallback/
+
+# ROMs and anything derived from them are never committed.
+*.z64
+*.n64
+*.v64
+baserom*
+*.bin
+
+# Diagnostics and captures from bring-up sessions
+*.log
+captures/
+saves/
+runtime-data/
+analysis/
+flakiness/
+deliverables/
+*.rej
+*.rej.orig
+*.mov
+*.mp4
+
+# The dependencies under tools/ were standalone git repositories. Their
+# histories are parked here so the move stays reversible, but they are not part
+# of this repository.
+.git.local/
+
+# Editor and OS
+.DS_Store
+.cursor/
+.vscode/
+.idea/

@@ -1,0 +1,297 @@
+name: Tests
+
+on:
+  push:
+    branches: [ main, dev, develop ]
+  pull_request:
+    branches: [ main, dev, develop ]
+
+# OSSF Scorecard Token-Permissions: default to read-only so any job
+# without an explicit permissions block can only read repo contents.
+# Codecov upload (java-build job) and any future job needing write
+# scopes must add their own job-level permissions block.
+permissions:
+  contents: read
+
+jobs:
+  java-build:
+    name: Java Build (Maven)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        java-version: [ '21' ]
+
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
+
+    - name: Set up Java
+      uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95  # v5.6.0
+      with:
+        java-version: ${{ matrix.java-version }}
+        distribution: 'temurin'
+        cache: maven
+
+    - name: Cache Ghidra installation
+      id: cache-ghidra
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+      with:
+        path: /tmp/ghidra
+        key: ghidra-12.1.2-PUBLIC-20260605
+
+    - name: Download Ghidra
+      if: steps.cache-ghidra.outputs.cache-hit != 'true'
+      run: |
+        echo "Downloading Ghidra 12.1.2..."
+        curl -sL -o /tmp/ghidra.zip \
+          "https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_12.1.2_build/ghidra_12.1.2_PUBLIC_20260605.zip"
+        mkdir -p /tmp/ghidra
+        unzip -q /tmp/ghidra.zip -d /tmp/ghidra
+        rm /tmp/ghidra.zip
+
+    - name: Install Ghidra JARs to Maven local repository
+      run: |
+        GHIDRA_DIR=$(find /tmp/ghidra -maxdepth 1 -type d -name 'ghidra_*' | head -1)
+        GHIDRA_VERSION="12.1.2"
+        echo "Using Ghidra directory: $GHIDRA_DIR"
+
+        # Install Framework JARs
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Framework/Generic/lib/Generic.jar" \
+            -DgroupId=ghidra -DartifactId=Generic -Dversion=$GHIDRA_VERSION -Dpackaging=jar
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Framework/SoftwareModeling/lib/SoftwareModeling.jar" \
+            -DgroupId=ghidra -DartifactId=SoftwareModeling -Dversion=$GHIDRA_VERSION -Dpackaging=jar
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Framework/Project/lib/Project.jar" \
+            -DgroupId=ghidra -DartifactId=Project -Dversion=$GHIDRA_VERSION -Dpackaging=jar
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Framework/Docking/lib/Docking.jar" \
+            -DgroupId=ghidra -DartifactId=Docking -Dversion=$GHIDRA_VERSION -Dpackaging=jar
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Framework/Utility/lib/Utility.jar" \
+            -DgroupId=ghidra -DartifactId=Utility -Dversion=$GHIDRA_VERSION -Dpackaging=jar
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Framework/Gui/lib/Gui.jar" \
+            -DgroupId=ghidra -DartifactId=Gui -Dversion=$GHIDRA_VERSION -Dpackaging=jar
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Framework/FileSystem/lib/FileSystem.jar" \
+            -DgroupId=ghidra -DartifactId=FileSystem -Dversion=$GHIDRA_VERSION -Dpackaging=jar
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Framework/Graph/lib/Graph.jar" \
+            -DgroupId=ghidra -DartifactId=Graph -Dversion=$GHIDRA_VERSION -Dpackaging=jar
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Framework/DB/lib/DB.jar" \
+            -DgroupId=ghidra -DartifactId=DB -Dversion=$GHIDRA_VERSION -Dpackaging=jar
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Framework/Emulation/lib/Emulation.jar" \
+            -DgroupId=ghidra -DartifactId=Emulation -Dversion=$GHIDRA_VERSION -Dpackaging=jar
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Framework/Help/lib/Help.jar" \
+            -DgroupId=ghidra -DartifactId=Help -Dversion=$GHIDRA_VERSION -Dpackaging=jar
+
+        # Install Debugger JARs (for DebuggerService, v5.4.0+)
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Debug/Debugger-api/lib/Debugger-api.jar" \
+            -DgroupId=ghidra -DartifactId=Debugger-api -Dversion=$GHIDRA_VERSION -Dpackaging=jar
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Debug/Framework-TraceModeling/lib/Framework-TraceModeling.jar" \
+            -DgroupId=ghidra -DartifactId=Framework-TraceModeling -Dversion=$GHIDRA_VERSION -Dpackaging=jar
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Debug/Debugger-rmi-trace/lib/Debugger-rmi-trace.jar" \
+            -DgroupId=ghidra -DartifactId=Debugger-rmi-trace -Dversion=$GHIDRA_VERSION -Dpackaging=jar
+
+        # Install Feature JARs
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Features/Base/lib/Base.jar" \
+            -DgroupId=ghidra -DartifactId=Base -Dversion=$GHIDRA_VERSION -Dpackaging=jar
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Features/Decompiler/lib/Decompiler.jar" \
+            -DgroupId=ghidra -DartifactId=Decompiler -Dversion=$GHIDRA_VERSION -Dpackaging=jar
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Features/PDB/lib/PDB.jar" \
+            -DgroupId=ghidra -DartifactId=PDB -Dversion=$GHIDRA_VERSION -Dpackaging=jar
+        mvn -q install:install-file -Dfile="$GHIDRA_DIR/Ghidra/Features/FunctionID/lib/FunctionID.jar" \
+            -DgroupId=ghidra -DartifactId=FunctionID -Dversion=$GHIDRA_VERSION -Dpackaging=jar
+
+        echo "✅ Installed Ghidra JARs to Maven local repository"
+
+    - name: Build with Maven
+      run: mvn clean package assembly:single -q -DskipTests
+
+    - name: Run offline Java tests
+      run: |
+        # Annotation-scanner, endpoints.json parity, and mock-based unit tests
+        # (e.g. ServiceUtilsAddressTest) — pure reflection / static checks, no Ghidra
+        # server. The true integration tests (GhidraMCPPluginTest,
+        # EndpointRegistrationTest, AppTest) require a running Ghidra instance and are
+        # excluded from this run.
+        #
+        # com.xebyte.core is included too: those are Mockito/ProgramBuilder tests
+        # that need no server either, and they cover the no-return + flow-repair
+        # behavior (#384/#385). Matching only com.xebyte.offline meant they never
+        # ran in CI at all. The one ProgramBuilder suite self-skips via assumeTrue
+        # when GHIDRA_INSTALL_DIR is unset, which is the case here.
+        mvn -q test -Pcoverage-gate -Dtest='com.xebyte.offline.*Test,com.xebyte.core.*Test'
+
+    - name: Verify build artifacts
+      run: |
+        echo "✅ Java compilation + offline tests passed"
+        ls -la target/GhidraMCP-*.zip 2>/dev/null || echo "No zip artifact (assembly may use different name)"
+        ls -la target/*.jar 2>/dev/null | head -5
+
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      with:
+        name: java-test-results
+        path: target/surefire-reports/
+
+    - name: Upload JaCoCo coverage report
+      # Offline-tier Java coverage. The -Pcoverage-gate profile on the test step
+      # above enforces the ratchet (pom.xml); this artifact is for inspecting
+      # where the gaps are — open target/site/jacoco/index.html.
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      with:
+        name: jacoco-coverage-report
+        path: target/site/jacoco/
+        if-no-files-found: warn
+
+    # Absorbs the former build.yml: publish the packaged extension zip so the build
+    # artifact stays available without a second workflow re-downloading Ghidra + rebuilding.
+    - name: Upload build artifact
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      with:
+        name: GhidraMCP-artifact
+        path: target/GhidraMCP-*.zip
+        if-no-files-found: warn
+
+  python-tests:
+    name: Python Tests (pytest)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [ '3.10', '3.11', '3.12', '3.13' ]
+
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+      with:
+        enable-cache: true
+
+    - name: Set up Python ${{ matrix.python-version }}
+      run: uv python install ${{ matrix.python-version }}
+
+    - name: Run Python unit tests
+      run: |
+        # Run only unit tests (integration tests require a running MCP server).
+        # uv installs the bridge package (editable) + test group from the lock.
+        # Coverage sources (bridge_mcp_ghidra, tools) come from the addopts in
+        # pyproject.toml. The fail-under floor is a RATCHET: it sits a few
+        # points below the measured baseline (63.6% on 2026-08-11, measured
+        # after the debugger package moved to d2-game-exe and left the
+        # denominator) to absorb platform/version skew — raise it as coverage
+        # improves, never lower it.
+        uv run --python ${{ matrix.python-version }} --group test \
+          pytest tests/unit/ -v --tb=short --cov-fail-under=58
+
+    - name: Upload coverage
+      if: ${{ always() && hashFiles('coverage.xml', 'tests/coverage.xml') != '' }}
+      uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f  # v5
+      with:
+        files: ./coverage.xml,./tests/coverage.xml
+        flags: unittests
+        fail_ci_if_error: false
+
+  python-tests-windows:
+    # The bridge has real platform forks (no AF_UNIX in Windows CPython, the
+    # drive-letter socket sweep, debugger proxy gating). The ubuntu matrix job
+    # only ever executes the POSIX half — this leg executes the Windows half
+    # so both sides of every `os.name == "nt"` branch run on each PR.
+    name: Python Tests (pytest, Windows)
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+      with:
+        enable-cache: true
+
+    - name: Set up JDK 21
+      # A unit test shells out to `gradlew deploy --dry-run`, which needs a Java
+      # 21 toolchain; windows-latest doesn't provide one Gradle can auto-detect
+      # (the ubuntu runner ships JAVA_HOME_21 by default, Windows does not).
+      uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95  # v5.6.0
+      with:
+        java-version: '21'
+        distribution: 'temurin'
+
+    - name: Set up Python
+      run: uv python install 3.12
+
+    - name: Run Python unit tests
+      # No coverage floor here — Windows skips a handful of POSIX-only tests,
+      # so the ubuntu job owns the ratchet; this leg gates on pass/fail only.
+      run: |
+        uv run --python 3.12 --group test pytest tests/unit/ -v --no-cov --tb=short
+
+  code-quality:
+    # ADVISORY / non-blocking: every step below ends in `|| true` (or an echo
+    # fallback), so this job surfaces lint/format drift without ever failing CI.
+    # It is intentionally NOT a gate — `build-status` does not depend on it. To make
+    # it gating, drop the `|| true` once the tree is verified flake8/black-clean.
+    name: Code Quality (advisory, non-blocking)
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+      with:
+        enable-cache: true
+
+    - name: Run flake8
+      run: uvx flake8 python/bridge_mcp_ghidra/ --max-line-length=120 --ignore=E501,W503 || true
+
+    - name: Check formatting with black
+      run: uvx black --check python/bridge_mcp_ghidra/ 2>/dev/null || echo "black check skipped"
+
+  markdown-lint:
+    # ADVISORY / non-blocking: continue-on-error means findings never fail CI, and
+    # build-status does not depend on this job. Informational doc-lint only.
+    name: Documentation Quality (advisory, non-blocking)
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
+
+    - name: Lint markdown
+      uses: DavidAnson/markdownlint-cli2-action@6bf21b07787794f89a243495939cd651942aeabe  # v24.1.0
+      with:
+        globs: '**/*.md'
+        config: '.markdownlintrc'
+      continue-on-error: true
+
+  pester-tests:
+    name: Pester (ghidra-mcp-setup.ps1)
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
+
+    - name: Run Pester suite
+      shell: powershell
+      run: .\tests\pester\Run-Tests.ps1 -CI
+
+    - name: Upload Pester results
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      with:
+        name: pester-results
+        path: tests/pester/pester-results.xml
+
+  build-status:
+    name: Build Status
+    runs-on: ubuntu-latest
+    needs: [ java-build, python-tests, python-tests-windows, pester-tests ]
+    if: always()
+
+    steps:
+    - name: Report Status
+      run: |
+        if [ "${{ needs.java-build.result }}" = "success" ] && [ "${{ needs.python-tests.result }}" = "success" ] && [ "${{ needs.python-tests-windows.result }}" = "success" ] && [ "${{ needs.pester-tests.result }}" = "success" ]; then
+          echo "✅ All tests passed"
+          exit 0
+        else
+          echo "❌ Some tests failed"
+          exit 1
+        fi

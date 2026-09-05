@@ -1,0 +1,6 @@
+# Local dumps from the user's ROM. Never commit these.
+*.dds
+*.png
+*.tga
+rt64-low-mip-cache.bin
+dumps/

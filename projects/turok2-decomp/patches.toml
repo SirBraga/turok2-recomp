@@ -1,0 +1,14 @@
+# Config for the future MIPS patches.elf pipeline (Zelda64Recomp-style).
+# Live 60 FPS currently uses src/patches/native_60.cpp + [[patches.hook]]
+# in turok2.us.toml. Enable this file once clang -target mips and ld.lld
+# produce patches/patches.elf.
+
+[input]
+elf_path = "patches/patches.elf"
+output_func_path = "RecompiledPatches"
+single_file_output = true
+use_absolute_symbols = true
+output_binary_path = "patches/patches.bin"
+unpaired_lo16_warnings = false
+allow_exports = true
+strict_patch_mode = true

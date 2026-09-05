@@ -1,0 +1,115 @@
+--- a/RecompiledFuncs/funcs_13.c
++++ b/RecompiledFuncs/funcs_13.c
+@@ -4880,6 +4880,7 @@
+     MEM_W(0X10, ctx->r29) = ctx->r16;
+     // 0x0042CFBC: sw          $s4, 0x3600($s4)
+     MEM_W(0X3600, ctx->r20) = ctx->r20;
++    func_0042CFC0(rdram, ctx);
+ ;}
+ RECOMP_FUNC void func_00290D90(uint8_t* rdram, recomp_context* ctx) {
+     uint64_t hi = 0, lo = 0, result = 0;
+--- a/RecompiledFuncs/funcs_14.c
++++ b/RecompiledFuncs/funcs_14.c
+@@ -618,6 +618,10 @@
+     MEM_B(0X2A, ctx->r4) = ctx->r2;
+     // 0x0041BBAC: sb          $zero, 0x2C($a0)
+     MEM_B(0X2C, ctx->r4) = 0;
++    // The provisional decomp boundary at 0x0041BBB0 splits this function
++    // before its epilogue. Continue into the generated tail so s0-s3 and the
++    // stack pointer are restored for the caller.
++    func_0041BBB0(rdram, ctx);
+ ;}
+ RECOMP_FUNC void func_00267E44(uint8_t* rdram, recomp_context* ctx) {
+     uint64_t hi = 0, lo = 0, result = 0;
+--- a/RecompiledFuncs/funcs_33.c
++++ b/RecompiledFuncs/funcs_33.c
+@@ -5448,6 +5448,7 @@
+     MEM_W(0X14, ctx->r29) = ctx->r17;
+     // 0x0042D13C: sw          $s0, 0x10($sp)
+     MEM_W(0X10, ctx->r29) = ctx->r16;
++    func_0042D140(rdram, ctx);
+ ;}
+ RECOMP_FUNC void func_0025AC04(uint8_t* rdram, recomp_context* ctx) {
+     uint64_t hi = 0, lo = 0, result = 0;
+--- a/RecompiledFuncs/funcs_49.c
++++ b/RecompiledFuncs/funcs_49.c
+@@ -2382,6 +2382,13 @@
+     // 0x0042C40C: lw          $s0, 0x10($sp)
+     ctx->r16 = MEM_W(ctx->r29, 0X10);
+     // 0x0042C410: jr          $ra
++    // 0x0042C414: addiu       $sp, $sp, 0x18
++    // The ELF carries a spurious symbol, func_0042C414, on this jr's delay slot,
++    // so the recompiler ended the function one instruction early and dropped the
++    // stack restore. Without it this function leaks 0x18 bytes of stack on every
++    // call, which makes its caller's epilogue reload saved registers from the
++    // wrong addresses.
++    ctx->r29 = ADD32(ctx->r29, 0X18);
+     return;
+ ;}
+ RECOMP_FUNC void func_0026CB2C(uint8_t* rdram, recomp_context* ctx) {
+--- a/RecompiledFuncs/funcs_50.c
++++ b/RecompiledFuncs/funcs_50.c
+@@ -394,6 +395,7 @@
+     int c1cs = 0;
+     // 0x0028EE40: lw          $t8, 0x10($sp)
+     ctx->r24 = MEM_W(ctx->r29, 0X10);
++    func_0028EE44(rdram, ctx);
+ ;}
+ RECOMP_FUNC void func_00205D0C(uint8_t* rdram, recomp_context* ctx) {
+     uint64_t hi = 0, lo = 0, result = 0;
+--- a/RecompiledFuncs/funcs_6.c
++++ b/RecompiledFuncs/funcs_6.c
+@@ -3588,6 +3588,7 @@
+     after_1:
+     // 0x0042D03C: lw          $v0, 0x4($s0)
+     ctx->r2 = MEM_W(ctx->r16, 0X4);
++    func_0042D040(rdram, ctx);
+ ;}
+ RECOMP_FUNC void func_0029E230(uint8_t* rdram, recomp_context* ctx) {
+     uint64_t hi = 0, lo = 0, result = 0;
+--- a/RecompiledFuncs/funcs_68.c
++++ b/RecompiledFuncs/funcs_68.c
+@@ -1409,6 +1409,11 @@
+     // 0x0042C47C: addu        $s0, $a0, $zero
+     ctx->r16 = ADD32(ctx->r4, 0);
+     after_0:
++    // A provisional symbol at 0x0042C480 splits this function, so the generated
++    // body stops right after the call and never reaches the branch on its result
++    // or the epilogue. Fall through into the continuation, which also leaks 0x18
++    // bytes of stack per call while missing.
++    func_0042C480(rdram, ctx);
+ ;}
+ RECOMP_FUNC void func_00422ED8(uint8_t* rdram, recomp_context* ctx) {
+     uint64_t hi = 0, lo = 0, result = 0;
+--- a/RecompiledFuncs/funcs_71.c
++++ b/RecompiledFuncs/funcs_71.c
+@@ -721,6 +721,9 @@
+     ctx->r2 = MEM_B(ctx->r2, 0X11);
+     // 0x0042AB28: mtc1        $v0, $f12
+     ctx->f12.u32l = ctx->r2;
++    // The provisional symbol at 0x0042AB2C splits this routine before its
++    // conversion and epilogue. Continue into the generated tail.
++    func_0042AB2C(rdram, ctx);
+ ;}
+ RECOMP_FUNC void func_0029B170(uint8_t* rdram, recomp_context* ctx) {
+     uint64_t hi = 0, lo = 0, result = 0;
+--- a/RecompiledFuncs/funcs_74.c
++++ b/RecompiledFuncs/funcs_74.c
+@@ -2414,6 +2414,7 @@
+     ctx->r1 = S32(0X800A << 16);
+     // 0x0042C61C: lwc1        $f20, 0x600C($at)
+     ctx->f20.u32l = MEM_W(ctx->r1, 0X600C);
++    func_0042C620(rdram, ctx);
+ ;}
+ RECOMP_FUNC void func_00276D98(uint8_t* rdram, recomp_context* ctx) {
+     uint64_t hi = 0, lo = 0, result = 0;
+--- a/RecompiledFuncs/funcs_82.c
++++ b/RecompiledFuncs/funcs_82.c
+@@ -648,6 +648,7 @@
+     after_9:
+     // 0x0042C388: addu        $v0, $s4, $zero
+     ctx->r2 = ADD32(ctx->r20, 0);
++    func_0042C38C(rdram, ctx);
+ ;}
+ RECOMP_FUNC void func_004169A0(uint8_t* rdram, recomp_context* ctx) {
+     uint64_t hi = 0, lo = 0, result = 0;

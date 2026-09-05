@@ -1,0 +1,18 @@
+--- tools/N64ModernRuntime/ultramodern/src/events.cpp
++++ tools/N64ModernRuntime/ultramodern/src/events.cpp
+@@ -467,6 +467,7 @@
+ 
+ extern "C" void osViSetMode(RDRAM_ARG PTR(OSViMode) mode_) {
+     std::lock_guard lock{ events_context.message_mutex };
++    printf("osViSetMode called with mode_ = %08X\n", mode_);
+     OSViMode* mode = TO_PTR(OSViMode, mode_);
+     ViState* next_state = events_context.vi.get_next_state();
+     next_state->mode = mode;
+@@ -491,6 +492,7 @@
+ 
+ extern "C" void osViSetEvent(RDRAM_ARG PTR(OSMesgQueue) mq_, OSMesg msg, u32 retrace_count) {
+     std::lock_guard lock{ events_context.message_mutex };
++    printf("osViSetEvent called with mq_ = %08X\n", mq_);
+     ViState* next_state = events_context.vi.get_next_state();
+     next_state->mq = mq_;
+     next_state->msg = msg;

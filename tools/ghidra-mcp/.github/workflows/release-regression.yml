@@ -1,0 +1,100 @@
+name: Release Regression
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, labeled]
+  workflow_dispatch:
+    inputs:
+      ghidra_path:
+        description: "Path to the Ghidra install on the self-hosted runner"
+        required: true
+        default: "F:\\ghidra_12.1.2_PUBLIC"
+      test_tier:
+        description: "Deploy regression tier to run"
+        required: true
+        type: choice
+        default: "release"
+        options:
+          - release
+          - selected-contract
+          - benchmark-read
+          - benchmark-write
+          - multi-program
+          - negative-contract
+          - endpoint-catalog
+  workflow_call:
+    inputs:
+      ghidra_path:
+        description: "Path to the Ghidra install on the self-hosted runner"
+        required: true
+        type: string
+      test_tier:
+        description: "Deploy regression tier to run"
+        required: false
+        type: string
+        default: "release"
+
+# OSSF Scorecard Token-Permissions: default to read-only. The
+# regression runner reads the checked-out tree and uploads test
+# artifacts (via actions/upload-artifact, which does NOT need
+# repo-write — it uses its own scoped token).
+permissions:
+  contents: read
+
+jobs:
+  live-ghidra-regression:
+    name: Live Ghidra Release Regression
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'live-ghidra-regression')
+    runs-on: [self-hosted, Windows]
+    timeout-minutes: 30
+    env:
+      GHIDRA_REGRESSION_PATH: ${{ inputs.ghidra_path || vars.GHIDRA_PATH || 'F:\ghidra_12.1.2_PUBLIC' }}
+      GHIDRA_REGRESSION_TIER: ${{ inputs.test_tier || 'release' }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95  # v5.6.0
+        with:
+          java-version: "21"
+          distribution: "temurin"
+          cache: maven
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          enable-cache: true
+
+      - name: Set up Python and dependencies
+        shell: powershell
+        run: |
+          uv python install 3.13
+          uv sync --python 3.13 --group test
+
+      - name: Build Benchmark.dll
+        shell: powershell
+        run: uv run python fun-doc\benchmark\build.py
+
+      - name: Install Ghidra jars
+        shell: powershell
+        run: uv run python -m tools.setup install-ghidra-deps --ghidra-path "$env:GHIDRA_REGRESSION_PATH"
+
+      - name: Build extension
+        shell: powershell
+        run: uv run python -m tools.setup build
+
+      - name: Deploy and run release regression
+        shell: powershell
+        run: uv run python -m tools.setup deploy --ghidra-path "$env:GHIDRA_REGRESSION_PATH" --test "$env:GHIDRA_REGRESSION_TIER"
+
+      - name: Upload test artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: release-regression-artifacts
+          path: |
+            tests/junit.xml
+            target/*.zip
+            deploy-debug.log
+          if-no-files-found: ignore

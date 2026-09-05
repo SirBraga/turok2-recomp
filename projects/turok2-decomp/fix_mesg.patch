@@ -1,0 +1,13 @@
+--- ../../tools/N64ModernRuntime/ultramodern/src/mesgqueue.cpp
++++ ../../tools/N64ModernRuntime/ultramodern/src/mesgqueue.cpp
+@@ -205,6 +205,10 @@
+ }
+ 
+ extern "C" s32 osRecvMesg(RDRAM_ARG PTR(OSMesgQueue) mq_, PTR(OSMesg) msg_, s32 flags) {
++    if (flags == 1) { // OS_MESG_BLOCK
++        printf("osRecvMesg blocking on mq_ = %08X\n", mq_);
++    }
++
+     OSMesgQueue* mq = TO_PTR(OSMesgQueue, mq_);
+     // Check if the queue isn't empty (we can receive a message).
+     bool has_msg = mq->validCount > 0;
