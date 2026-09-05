@@ -4,6 +4,12 @@
 *.dll
 *.exe
 *.lib
+# Vendored Windows binaries the build copies next to the exe. Without these
+# exceptions the CI configures, then fails at link or at first launch.
+!src/contrib/mupen64plus-win32-deps/**/*.dll
+!src/contrib/mupen64plus-win32-deps/**/*.lib
+!src/contrib/dxc/bin/x64/*.exe
+!src/contrib/dxc/bin/x64/*.dll
 *.exp
 *.ipdb
 *.iobj
@@ -19,7 +25,11 @@
 *.rw.h
 *.obj
 *.pdb
-build/
+/build/
+# The unanchored form also matched src/contrib/zstd/build/cmake, which is
+# source, not a build tree.
+!src/contrib/zstd/build/
+!src/contrib/zstd/build/**
 .vscode/
 .idea
 cmake-build-debug*

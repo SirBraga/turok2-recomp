@@ -3,6 +3,10 @@ build/
 build-app/
 build-native/
 build-win/
+# zstd's own CMake lives at .../zstd/build/cmake. The unanchored `build/`
+# above would drop it; the CI already failed on that exact path.
+!tools/rt64/src/contrib/zstd/build/
+!tools/rt64/src/contrib/zstd/build/**
 dist/
 cmake-build-*/
 **/CMakeFiles/
