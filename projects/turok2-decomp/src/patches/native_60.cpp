@@ -117,9 +117,9 @@ static float camera_fog_scale() {
 // least as far as draw distance (floor 2.0) so the wall does not sit at the
 // authored N64 range while far clip is already doubled.
 static float fog_distance_scale() {
-    const float far = camera_far_scale();
-    const float fog = camera_fog_scale();
-    float scale = far > fog ? far : fog;
+    const float far_scale = camera_far_scale();
+    const float fog_scale = camera_fog_scale();
+    float scale = far_scale > fog_scale ? far_scale : fog_scale;
     if (scale < 2.0f) {
         scale = 2.0f;
     }

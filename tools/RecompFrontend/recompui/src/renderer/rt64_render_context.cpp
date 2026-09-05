@@ -8,7 +8,7 @@
 #include <filesystem>
 #include <system_error>
 
-#include <SDL2/SDL.h>
+#include <SDL.h>
 
 #include "hle/rt64_application.h"
 #include "hle/rt64_present_queue.h"

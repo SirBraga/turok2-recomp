@@ -2,7 +2,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <SDL_video.h>
 #else
-#include <SDL2/SDL_video.h>
+#include <SDL_video.h>
 #endif
 #include <chrono>
 
