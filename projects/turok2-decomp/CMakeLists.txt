@@ -96,8 +96,12 @@ if(TUROK2_BUILD_APP)
     target_include_directories(rt64 PRIVATE "${CMAKE_BINARY_DIR}/rt64/src")
 
     # RT64's shader helper functions resolve these variables in the caller's
-    # scope when RecompFrontend invokes them.
-    if(APPLE)
+    # scope when RecompFrontend invokes them. Leaving DXC unset makes Ninja
+    # emit a command that starts at the first flag, which cmd.exe then
+    # treats as the program name.
+    if(WIN32)
+        set(DXC "${TUROK2_RT64_DIR}/src/contrib/dxc/bin/x64/dxc.exe")
+    elseif(APPLE)
         set(DXC
             "DYLD_LIBRARY_PATH=${CMAKE_CURRENT_SOURCE_DIR}/../../tools/rt64/src/contrib/dxc/lib/arm64"
             "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/rt64/src/contrib/dxc/bin/arm64/dxc-macos")
