@@ -41,7 +41,11 @@ target_include_directories(recompinput PRIVATE
 )
 
 if (WIN32)
-    target_include_directories(recompinput PRIVATE ${sdl2_SOURCE_DIR}/include)
+    if (SDL2_INCLUDE_DIRS)
+        target_include_directories(recompinput PRIVATE ${SDL2_INCLUDE_DIRS})
+    else()
+        target_include_directories(recompinput PRIVATE ${sdl2_SOURCE_DIR}/include)
+    endif()
 elseif (APPLE OR CMAKE_SYSTEM_NAME MATCHES "Linux")
     target_include_directories(recompinput PRIVATE ${SDL2_INCLUDE_DIRS})
 endif()

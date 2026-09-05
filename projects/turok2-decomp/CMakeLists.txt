@@ -90,7 +90,13 @@ if(TUROK2_BUILD_APP)
     if(WIN32)
         set(TUROK2_SDL2_DIR
             "${TUROK2_RT64_DIR}/src/contrib/mupen64plus-win32-deps/SDL2-2.26.3")
-        set(SDL2_INCLUDE_DIRS "${TUROK2_SDL2_DIR}/include")
+        # Vendored headers live in include/SDL.h. Some TUs still write
+        # <SDL2/SDL.h>, so expose both layouts from the build tree.
+        set(TUROK2_SDL2_COMPAT "${CMAKE_BINARY_DIR}/sdl2-compat")
+        file(MAKE_DIRECTORY "${TUROK2_SDL2_COMPAT}/SDL2")
+        file(GLOB TUROK2_SDL2_HEADERS "${TUROK2_SDL2_DIR}/include/*.h")
+        file(COPY ${TUROK2_SDL2_HEADERS} DESTINATION "${TUROK2_SDL2_COMPAT}/SDL2")
+        set(SDL2_INCLUDE_DIRS "${TUROK2_SDL2_DIR}/include" "${TUROK2_SDL2_COMPAT}")
         set(SDL2_LIBRARIES "SDL2" "SDL2main")
         # RecompFrontend still looks for the FetchContent-style sdl2_SOURCE_DIR
         # on Windows. Point it at the vendored tree so SDL.h resolves.

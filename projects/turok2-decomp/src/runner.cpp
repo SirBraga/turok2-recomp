@@ -23,8 +23,8 @@
 #endif
 
 #define SDL_MAIN_HANDLED
-#include <SDL2/SDL.h>
-#include <SDL2/SDL_syswm.h>
+#include <SDL.h>
+#include <SDL_syswm.h>
 
 #include "librecomp/game.hpp"
 #include "librecomp/mods.hpp"
