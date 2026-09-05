@@ -1,9 +1,12 @@
 #include <cstdio>
 #include <cstdlib>
+#include <cstdint>
 #include <memory>
 #include <ultramodern/ultra64.h>
 #include <ultramodern/ultramodern.hpp>
 #include "recomp.h"
+
+extern "C" void turok2_register_mesg_queue(uint32_t addr, uint32_t msg_count);
 
 static bool turok2_runtime_diagnostics() {
     static const bool enabled = std::getenv("TUROK2_RUNTIME_DIAGNOSTICS") != nullptr;
@@ -229,6 +232,8 @@ extern "C" void osCreateMesgQueue_recomp(uint8_t* rdram, recomp_context* ctx) {
             static_cast<uint32_t>(ctx->r6), static_cast<uint32_t>(ctx->r31));
     }
     osCreateMesgQueue(rdram, (int32_t)ctx->r4, (int32_t)ctx->r5, (s32)ctx->r6);
+    turok2_register_mesg_queue(static_cast<uint32_t>(ctx->r4),
+                              static_cast<uint32_t>(ctx->r6));
 }
 
 extern "C" void osRecvMesg_recomp(uint8_t* rdram, recomp_context* ctx) {

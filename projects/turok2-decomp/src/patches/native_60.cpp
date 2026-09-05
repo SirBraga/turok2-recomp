@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "librecomp/game.hpp"
+#include "hle/rt64_turok2_adon_cover.h"
 
 // Unique 60 Hz Update/Draw for gameplay and cinema. Authored cinema keys are
 // float seconds: CIN_Update_Time (func_00284568 / func_00283CD4) does
@@ -248,6 +249,7 @@ extern "C" void turok2_patch_native_60(uint8_t* rdram, recomp_context* ctx) {
         g_update_gen++;
     }
     turok2_patch_restore_resource_table(rdram, ctx);
+    turok2_debug_tick(rdram, g_cinema ? 1 : 0);
 }
 
 static void apply_native_increment(uint8_t* rdram) {
@@ -524,6 +526,32 @@ extern "C" void turok2_patch_scale_frame_a1(uint8_t* rdram, recomp_context* ctx)
 
 extern "C" void turok2_patch_scale_frame_t0(uint8_t* rdram, recomp_context* ctx) {
     scale_loaded_frame(rdram, &ctx->r8);
+}
+
+extern "C" void turok2_patch_frame_lsb_dirty(uint8_t* rdram, recomp_context* ctx) {
+    // func_002152AC at 0x002152E0: $v1 is CGameSimpleInstance.m_DrawFrame
+    // (+0x194), $v0 is gFrameCount LSB (0x800B6D1B). Equal → skip the write
+    // into m_mOrientation[0x6D1C] and still draw that slot. Leftover-holding
+    // the LSB would skip more often while 0x6D1C keeps flipping — empty mtx,
+    // fog-colored frame. Force a mismatch in cinema so the current slot is
+    // always rebuilt. Init already stores LSB-1; this covers the 256-wrap
+    // and same-Draw double-call cases. TUROK2_NO_6D1B_DIRTY=1 for A/B.
+    (void)rdram;
+    const uint8_t cached = static_cast<uint8_t>(ctx->r3);
+    const uint8_t lsb = static_cast<uint8_t>(ctx->r2);
+    const bool would_skip = cached == lsb;
+    if (g_cinema) {
+        if (would_skip) {
+            g_turok2_lsb_skip_acc.fetch_add(1, std::memory_order_relaxed);
+        } else {
+            g_turok2_lsb_rebuild_acc.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
+    static const bool disabled = env_flag_on("TUROK2_NO_6D1B_DIRTY");
+    if (preserve_authored_cadence() || disabled || !g_cinema || !would_skip) {
+        return;
+    }
+    ctx->r2 = static_cast<int32_t>(static_cast<uint8_t>(cached ^ 1u));
 }
 
 // TUROK2_FIND_TIMERS=1 sweeps RDRAM once per Draw and reports every word
@@ -883,6 +911,339 @@ static void find_frame_timers(uint8_t* rdram) {
     }
 }
 
+// LibTEngine CEngineApp / CCamera cover layers. A healthy RT64 scene plus
+// one of these going non-zero is the remaining Adon-flat hypothesis.
+constexpr uint32_t kGameApp = 0x800F6CB0u;
+constexpr uint32_t kCamPool = kGameApp + 0x22C00u;
+constexpr uint32_t kMainCamera = kCamPool + 0x40u; // 0x801198F0
+
+static bool adon_cover_wanted() {
+    static const bool cover = env_flag_on("TUROK2_ADON_COVER");
+    static const bool present = env_flag_on("TUROK2_PRESENT_TRACE");
+    static const bool pair = env_flag_on("TUROK2_PAIR_TRACE");
+    return cover || present || pair;
+}
+
+static bool adon_cover_log_on() {
+    static const bool cover = env_flag_on("TUROK2_ADON_COVER");
+    return cover;
+}
+
+static bool adon_cover_verbose() {
+    static const bool verbose = [] {
+        const char* value = std::getenv("TUROK2_ADON_COVER");
+        return value != nullptr && (value[0] == '2' || std::strcmp(value, "all") == 0);
+    }();
+    return verbose;
+}
+
+struct AdonCam {
+    uint32_t addr = 0;
+    int32_t mode = 0;
+    float timer = 0.0f;
+    uint32_t flash = 0;
+    uint32_t dec = 0;
+    uint32_t r = 0;
+    uint32_t g = 0;
+    uint32_t b = 0;
+    uint32_t a = 0;
+    uint32_t fog_r = 0;
+    uint32_t fog_g = 0;
+    uint32_t fog_b = 0;
+};
+
+static bool read_adon_cam(uint8_t* rdram, uint32_t cam, AdonCam* out) {
+    if (!guest_kseg0(cam) || cam > 0x807FF13Fu) {
+        return false;
+    }
+    const int32_t mode = MEM_W(static_cast<int32_t>(cam + 0x52Cu), 0);
+    if (mode < 0 || mode > 3) {
+        return false;
+    }
+    const float timer = load_f32(rdram, static_cast<int32_t>(cam + 0x520u));
+    if (!std::isfinite(timer)) {
+        return false;
+    }
+    out->addr = cam;
+    out->mode = mode;
+    out->timer = timer;
+    out->flash = MEM_BU(static_cast<int32_t>(cam + 0x530u), 0);
+    out->dec = MEM_BU(static_cast<int32_t>(cam + 0x531u), 0);
+    out->r = MEM_BU(static_cast<int32_t>(cam + 0x536u), 0);
+    out->g = MEM_BU(static_cast<int32_t>(cam + 0x537u), 0);
+    out->b = MEM_BU(static_cast<int32_t>(cam + 0x538u), 0);
+    out->a = MEM_BU(static_cast<int32_t>(cam + 0x539u), 0);
+    out->fog_r = MEM_BU(static_cast<int32_t>(cam + 0x508u), 0);
+    out->fog_g = MEM_BU(static_cast<int32_t>(cam + 0x509u), 0);
+    out->fog_b = MEM_BU(static_cast<int32_t>(cam + 0x50Au), 0);
+    return true;
+}
+
+static void fill_view_from_camera(uint8_t* rdram, uint32_t cam,
+                                  Turok2AdonCover* snap) {
+    if (!guest_kseg0(cam) || cam > 0x807FF13Fu || snap == nullptr) {
+        return;
+    }
+    snap->far_clip = load_f32(rdram, static_cast<int32_t>(cam + 0x510u));
+    // Player look lives in CCameraViewParams (+0x24): m_RotY and m_vRotOffset.
+    // CCamera.m_vRotation (+0x120) stays 0 on the main gameplay camera.
+    snap->pitch = load_f32(rdram, static_cast<int32_t>(cam + 0x2Cu));
+    snap->yaw = load_f32(rdram, static_cast<int32_t>(cam + 0x28u));
+    if (!std::isfinite(snap->far_clip)) {
+        snap->far_clip = 0.0f;
+    }
+    if (!std::isfinite(snap->pitch)) {
+        snap->pitch = 0.0f;
+    }
+    if (!std::isfinite(snap->yaw)) {
+        snap->yaw = 0.0f;
+    }
+    snap->region = MEM_W(static_cast<int32_t>(cam + 0x500u), 0);
+    snap->vis_bits = MEM_W(static_cast<int32_t>(cam + 0x64u), 0);
+    snap->pregion = MEM_W(static_cast<int32_t>(cam + 0x58u), 0);
+    snap->underwater = MEM_BU(static_cast<int32_t>(cam + 0x53Au), 0);
+    snap->fog_r = MEM_BU(static_cast<int32_t>(cam + 0x508u), 0);
+    snap->fog_g = MEM_BU(static_cast<int32_t>(cam + 0x509u), 0);
+    snap->fog_b = MEM_BU(static_cast<int32_t>(cam + 0x50Au), 0);
+    snap->sky_layers = MEM_H(static_cast<int32_t>(cam + 0xE20u), 0);
+    snap->sky_alpha = load_f32(rdram, static_cast<int32_t>(cam + 0x760u));
+    if (!std::isfinite(snap->sky_alpha)) {
+        snap->sky_alpha = 0.0f;
+    }
+    snap->fog_min = g_turok2_adon_fog_min.load(std::memory_order_relaxed);
+    snap->fog_min_in = g_turok2_adon_fog_min_in.load(std::memory_order_relaxed);
+}
+
+static void publish_view(uint8_t* rdram, uint32_t camera) {
+    // Gameplay HUD/log follow the main camera only. The cinema camera
+    // also hits this hook and was overwriting pitch/region every Draw.
+    if (!g_cinema && camera != kMainCamera) {
+        return;
+    }
+    Turok2AdonCover snap = turok2_adon_cover_copy();
+    fill_view_from_camera(rdram, camera, &snap);
+    if (snap.cam == 0) {
+        snap.cam = camera;
+    }
+    snap.live = 1;
+    turok2_adon_cover_publish(snap);
+
+    static Turok2AdonCover prev{};
+    static bool primed = false;
+    const bool changed = !primed ||
+        prev.region != snap.region ||
+        prev.vis_bits != snap.vis_bits ||
+        prev.pregion != snap.pregion ||
+        prev.fog_min_in != snap.fog_min_in ||
+        prev.fog_r != snap.fog_r ||
+        prev.fog_g != snap.fog_g ||
+        prev.fog_b != snap.fog_b ||
+        prev.sky_layers != snap.sky_layers ||
+        std::fabs(prev.far_clip - snap.far_clip) > 5.0f;
+    primed = true;
+    if (!changed) {
+        return;
+    }
+    prev = snap;
+    if (g_cinema) {
+        return;
+    }
+    std::fprintf(stderr,
+        "[view] cam=%08X fogMin=%u->%u rgb=%02X%02X%02X far=%.1f "
+        "pitch=%.2f yaw=%.2f region=%d vis=%08X preg=%08X sky=%d a=%.2f\n",
+        camera, snap.fog_min_in, snap.fog_min,
+        snap.fog_r, snap.fog_g, snap.fog_b, snap.far_clip,
+        snap.pitch, snap.yaw, snap.region, snap.vis_bits, snap.pregion,
+        snap.sky_layers, snap.sky_alpha);
+}
+
+static const char* flash_mode_name(int32_t mode) {
+    switch (mode) {
+        case 0: return "OFF";
+        case 1: return "ATTACK";
+        case 2: return "SUSTAIN";
+        case 3: return "DECAY";
+        default: return "?";
+    }
+}
+
+static uint32_t g_adon_draw = 0;
+
+static void adon_cover_probe(uint8_t* rdram) {
+    if (!adon_cover_wanted()) {
+        return;
+    }
+    ++g_adon_draw;
+
+    Turok2AdonCover snap;
+    snap.draw = g_adon_draw;
+    snap.frame_count = static_cast<uint32_t>(MEM_W(0x800B6D18, 0));
+    snap.cinema = g_cinema ? 1u : 0u;
+    snap.fade_fast = MEM_BU(static_cast<int32_t>(kGameApp + 0x23FE0u), 0);
+    snap.fade_status = MEM_BU(static_cast<int32_t>(kGameApp + 0x23FE1u), 0);
+    snap.fade_alpha = load_f32(rdram, static_cast<int32_t>(kGameApp + 0x23FE4u));
+    if (!std::isfinite(snap.fade_alpha)) {
+        snap.fade_alpha = 0.0f;
+    }
+    snap.live = 1;
+
+    AdonCam cams[8];
+    uint32_t n = 0;
+    auto push = [&](uint32_t addr) {
+        if (n >= 8) {
+            return;
+        }
+        for (uint32_t i = 0; i < n; ++i) {
+            if (cams[i].addr == addr) {
+                return;
+            }
+        }
+        AdonCam cam{};
+        if (read_adon_cam(rdram, addr, &cam)) {
+            cams[n++] = cam;
+        }
+    };
+
+    push(kMainCamera);
+    uint32_t cam = static_cast<uint32_t>(MEM_W(static_cast<int32_t>(kCamPool + 0x20u), 0));
+    for (uint32_t guard = 0; guest_kseg0(cam) && guard < 8; ++guard) {
+        push(cam);
+        cam = static_cast<uint32_t>(MEM_W(static_cast<int32_t>(cam + 4u), 0));
+    }
+
+    AdonCam best{};
+    bool have = false;
+    for (uint32_t i = 0; i < n; ++i) {
+        const bool hotter = !have || cams[i].mode > best.mode ||
+            (cams[i].mode == best.mode && cams[i].flash > best.flash);
+        if (hotter) {
+            best = cams[i];
+            have = true;
+        }
+    }
+    snap.cams = n;
+    if (have) {
+        snap.cam = best.addr;
+        snap.flash_mode = best.mode;
+        snap.flash_timer = best.timer;
+        snap.flash = best.flash;
+        snap.flash_dec = best.dec;
+        snap.flash_r = best.r;
+        snap.flash_g = best.g;
+        snap.flash_b = best.b;
+        snap.flash_a = best.a;
+        snap.fog_r = best.fog_r;
+        snap.fog_g = best.fog_g;
+        snap.fog_b = best.fog_b;
+    }
+    for (uint32_t i = 0; i < n; ++i) {
+        if (cams[i].addr == 0x806FF120u) {
+            snap.fog_r = cams[i].fog_r;
+            snap.fog_g = cams[i].fog_g;
+            snap.fog_b = cams[i].fog_b;
+            break;
+        }
+    }
+    snap.lsb_skip = g_turok2_lsb_skip_acc.exchange(0, std::memory_order_relaxed);
+    snap.lsb_rebuild = g_turok2_lsb_rebuild_acc.exchange(0, std::memory_order_relaxed);
+    uint32_t view_cam = kMainCamera;
+    if (snap.cinema != 0) {
+        for (uint32_t i = 0; i < n; ++i) {
+            if (cams[i].addr == 0x806FF120u) {
+                view_cam = cams[i].addr;
+                break;
+            }
+        }
+    } else if (have) {
+        view_cam = best.addr;
+    }
+    fill_view_from_camera(rdram, view_cam, &snap);
+    turok2_adon_cover_publish(snap);
+
+    if (!adon_cover_log_on()) {
+        return;
+    }
+
+    static Turok2AdonCover prev{};
+    static bool primed = false;
+    const bool changed = !primed ||
+        prev.cinema != snap.cinema ||
+        prev.fade_status != snap.fade_status ||
+        prev.fade_fast != snap.fade_fast ||
+        std::fabs(prev.fade_alpha - snap.fade_alpha) > 0.001f ||
+        prev.cam != snap.cam ||
+        prev.flash_mode != snap.flash_mode ||
+        prev.flash != snap.flash ||
+        prev.flash_r != snap.flash_r ||
+        prev.flash_g != snap.flash_g ||
+        prev.flash_b != snap.flash_b ||
+        prev.fog_r != snap.fog_r ||
+        prev.fog_g != snap.fog_g ||
+        prev.fog_b != snap.fog_b;
+    primed = true;
+    prev = snap;
+
+    const bool heartbeat = snap.cinema != 0 && (g_adon_draw % 60u) == 0u;
+    const bool verbose = adon_cover_verbose() && snap.cinema != 0;
+    if (!changed && !heartbeat && !verbose) {
+        return;
+    }
+
+    static const auto start = std::chrono::steady_clock::now();
+    const float now = std::chrono::duration<float>(
+        std::chrono::steady_clock::now() - start).count();
+    std::fprintf(stderr,
+        "[adon] %s draw=%u t=%.3f fc=%u cinema=%u fade=%.3f fst=%u ffast=%u "
+        "cam=%08X flash=%s/%u timer=%.3f rgb=%02X%02X%02X a=%u "
+        "fog=%02X%02X%02X skip=%u rebuild=%u cams=%u\n",
+        changed ? "edge" : (verbose ? "draw" : "beat"),
+        snap.draw, now, snap.frame_count, snap.cinema,
+        snap.fade_alpha, snap.fade_status, snap.fade_fast,
+        snap.cam, flash_mode_name(snap.flash_mode), snap.flash, snap.flash_timer,
+        snap.flash_r, snap.flash_g, snap.flash_b, snap.flash_a,
+        snap.fog_r, snap.fog_g, snap.fog_b, snap.lsb_skip, snap.lsb_rebuild,
+        snap.cams);
+    if (changed || verbose) {
+        for (uint32_t i = 0; i < n; ++i) {
+            std::fprintf(stderr,
+                "[adon]   cam=%08X flash=%s/%u timer=%.3f rgb=%02X%02X%02X "
+                "fog=%02X%02X%02X\n",
+                cams[i].addr, flash_mode_name(cams[i].mode), cams[i].flash,
+                cams[i].timer, cams[i].r, cams[i].g, cams[i].b,
+                cams[i].fog_r, cams[i].fog_g, cams[i].fog_b);
+        }
+    }
+}
+
+static void adon_cover_note_camera(uint8_t* rdram, uint32_t camera) {
+    if (!adon_cover_wanted()) {
+        return;
+    }
+    AdonCam cam{};
+    if (!read_adon_cam(rdram, camera, &cam)) {
+        return;
+    }
+    Turok2AdonCover snap = turok2_adon_cover_copy();
+    const bool hotter = (cam.mode > snap.flash_mode) ||
+        (cam.mode == snap.flash_mode && cam.flash > snap.flash) ||
+        snap.cam == 0 || snap.cam == camera;
+    if (hotter) {
+        snap.cam = cam.addr;
+        snap.flash_mode = cam.mode;
+        snap.flash_timer = cam.timer;
+        snap.flash = cam.flash;
+        snap.flash_dec = cam.dec;
+        snap.flash_r = cam.r;
+        snap.flash_g = cam.g;
+        snap.flash_b = cam.b;
+        snap.flash_a = cam.a;
+        snap.fog_r = cam.fog_r;
+        snap.fog_g = cam.fog_g;
+        snap.fog_b = cam.fog_b;
+        turok2_adon_cover_publish(snap);
+    }
+}
+
 extern "C" void turok2_patch_scale_frame_count(uint8_t* rdram, recomp_context* ctx) {
     // Kill-listed 2026-09-04: leftover-scaling the stored gFrameCount
     // froze boot (no [fps:engine], black VI). Hooks stay as no-ops.
@@ -891,6 +1252,7 @@ extern "C" void turok2_patch_scale_frame_count(uint8_t* rdram, recomp_context* c
     find_frame_timers(rdram);
     boot_timeline(rdram);
     attract_demo_probe(rdram);
+    adon_cover_probe(rdram);
 }
 
 extern "C" void turok2_patch_scale_frame_aux(uint8_t* rdram, recomp_context* ctx) {
@@ -1083,10 +1445,12 @@ extern "C" void turok2_patch_gameplay_camera(uint8_t* rdram, recomp_context* ctx
     // overwrite m_FarClip (+0x510) at 0x0027D9A4 — skip all scales there.
     // Do not write m_FieldOfView (+0x518) (would compound). Do not touch
     // m_mOnScreenProjection (+0x430) (weapon/HUD).
+    const uint32_t camera = static_cast<uint32_t>(ctx->r20);
+    publish_view(rdram, camera);
+    adon_cover_note_camera(rdram, camera);
     if (ctx->r2 != 0) {
         return;
     }
-    const uint32_t camera = static_cast<uint32_t>(ctx->r20);
     if ((camera < 0x80000000u) || (camera > 0x807FF13Fu)) {
         return;
     }
@@ -1121,6 +1485,331 @@ extern "C" void turok2_patch_gameplay_camera(uint8_t* rdram, recomp_context* ctx
     // Scaled in turok2_patch_fog_position when the DL is built.
 }
 
+// FAILED eye-test 2026-09-05. Opt-in TUROK2_CUT_HOLD=1 only. Dist override
+// TUROK2_CUT_HOLD_DIST (default 40). Do not leftover gFrameCount. Do not
+// pull the cinema eye. Do not add another pose lerp / 2×-Hz smoother.
+struct CinemaHold {
+    uint32_t cam = 0;
+    float good[16]{};
+    float in_x = 0.0f;
+    float in_y = 0.0f;
+    float in_z = 0.0f;
+    float in_zx = 0.0f;
+    float in_zy = 0.0f;
+    float in_zz = 0.0f;
+    bool primed = false;
+};
+
+static void load_mtx16(uint8_t* rdram, uint32_t mtx, float out[16]) {
+    for (uint32_t i = 0; i < 16; ++i) {
+        out[i] = load_f32(rdram, static_cast<int32_t>(mtx + i * 4u));
+    }
+}
+
+static void store_mtx16(uint8_t* rdram, uint32_t mtx, const float in[16]) {
+    for (uint32_t i = 0; i < 16; ++i) {
+        if (std::isfinite(in[i])) {
+            store_f32(rdram, static_cast<int32_t>(mtx + i * 4u), in[i]);
+        }
+    }
+}
+
+static CinemaHold* cinema_hold_slot(uint32_t camera) {
+    static CinemaHold slots[4];
+    for (uint32_t i = 0; i < 4; ++i) {
+        if (slots[i].cam == camera) {
+            return &slots[i];
+        }
+    }
+    for (uint32_t i = 0; i < 4; ++i) {
+        if (slots[i].cam == 0u) {
+            slots[i].cam = camera;
+            return &slots[i];
+        }
+    }
+    slots[0] = CinemaHold{};
+    slots[0].cam = camera;
+    return &slots[0];
+}
+
+static uint32_t camera_fog_rgb(uint8_t* rdram, uint32_t camera) {
+    return (static_cast<uint32_t>(MEM_BU(static_cast<int32_t>(camera + 0x508u), 0)) << 16) |
+           (static_cast<uint32_t>(MEM_BU(static_cast<int32_t>(camera + 0x509u), 0)) << 8) |
+           static_cast<uint32_t>(MEM_BU(static_cast<int32_t>(camera + 0x50Au), 0));
+}
+
+static uint32_t mask_rgb(uint32_t rgb, uint32_t mask) {
+    return ((rgb >> 16) & mask) << 16 | ((rgb >> 8) & mask) << 8 | (rgb & mask);
+}
+
+// Measure-only. Cinema fill is fog quantized to 5-bit / 3-bit. A flat
+// letterbox frame is that fill with no 3D coverage. Log sky / region /
+// vis / 0x6D20 on the path camera so the next capture can join.
+static void cinema_fill_note(uint8_t* rdram, uint32_t camera) {
+    if (camera != 0x806FF120u) {
+        return;
+    }
+    const uint32_t fog = camera_fog_rgb(rdram, camera);
+    const uint32_t fill5 = mask_rgb(fog, 0xF8u);
+    const uint32_t fill3 = mask_rgb(fog, 0xE0u);
+    const uint32_t preg = static_cast<uint32_t>(MEM_W(static_cast<int32_t>(camera + 0x58u), 0));
+    const uint32_t vis = static_cast<uint32_t>(MEM_W(static_cast<int32_t>(camera + 0x64u), 0));
+    const int32_t sky = MEM_H(static_cast<int32_t>(camera + 0xE20u), 0);
+    const float alpha = load_f32(rdram, static_cast<int32_t>(camera + 0x760u));
+    const uint32_t aux = static_cast<uint32_t>(MEM_W(0x800B6D20, 0));
+
+    static uint32_t prev_fog = 0;
+    static uint32_t prev_preg = 0;
+    static uint32_t prev_vis = 0;
+    static int32_t prev_sky = 0;
+    static bool primed = false;
+    static uint64_t n = 0;
+    const bool changed = !primed || fog != prev_fog || preg != prev_preg ||
+                         vis != prev_vis || sky != prev_sky;
+    const bool beat = ((n++ & 31u) == 0u);
+    if (!changed && !beat) {
+        return;
+    }
+    primed = true;
+    prev_fog = fog;
+    prev_preg = preg;
+    prev_vis = vis;
+    prev_sky = sky;
+    std::fprintf(stderr,
+        "[cin:fill] %s fog=%06X fill5=%06X fill3=%06X preg=%08X vis=%08X "
+        "sky=%d a=%.2f aux=%u n=%llu\n",
+        changed ? "edge" : "hb", fog, fill5, fill3, preg, vis, sky,
+        std::isfinite(alpha) ? alpha : 0.0f, aux,
+        static_cast<unsigned long long>(n));
+}
+
+static void cinema_hold_cut(uint8_t* rdram, uint32_t camera, uint32_t mtx,
+                            float px, float py, float pz,
+                            float zx, float zy, float zz) {
+    // FAILED eye-test 2026-09-05 including locked-off shots. Opt-in only.
+    static const bool disabled = !env_flag_on("TUROK2_CUT_HOLD");
+    static const float dist = env_scale_override("TUROK2_CUT_HOLD_DIST", 40.0f, 8.0f, 400.0f);
+    const float dist2 = dist * dist;
+
+    static bool announced = false;
+    if (!announced) {
+        announced = true;
+        std::fprintf(stderr, "[cin:hold] %s dist=%.1f\n",
+                     disabled ? "off" : "on", dist);
+    }
+
+    CinemaHold* slot = cinema_hold_slot(camera);
+    float dx = 0.0f;
+    float dy = 0.0f;
+    float dz = 0.0f;
+    float look_dot = 1.0f;
+    bool jump = false;
+    if (slot->primed) {
+        dx = px - slot->in_x;
+        dy = py - slot->in_y;
+        dz = pz - slot->in_z;
+        look_dot = zx * slot->in_zx + zy * slot->in_zy + zz * slot->in_zz;
+        jump = (dx * dx + dy * dy + dz * dz) > dist2 || look_dot < 0.25f;
+    }
+    slot->in_x = px;
+    slot->in_y = py;
+    slot->in_z = pz;
+    slot->in_zx = zx;
+    slot->in_zy = zy;
+    slot->in_zz = zz;
+
+    static uint64_t frames = 0;
+    static uint64_t holds = 0;
+    const bool heartbeat = ((frames++ & 63u) == 0u);
+    if (heartbeat) {
+        const uint32_t skip = g_turok2_lsb_skip_acc.exchange(0, std::memory_order_relaxed);
+        const uint32_t rebuild = g_turok2_lsb_rebuild_acc.exchange(0, std::memory_order_relaxed);
+        std::fprintf(stderr,
+            "[cin:lsb] skip=%u rebuild=%u holds=%llu cam=%08X\n",
+            skip, rebuild, static_cast<unsigned long long>(holds), camera);
+    }
+
+    const uint32_t fog = camera_fog_rgb(rdram, camera);
+    if (jump && !disabled && slot->primed) {
+        store_mtx16(rdram, mtx, slot->good);
+        store_f32(rdram, static_cast<int32_t>(camera + 0x038u), slot->good[12]);
+        store_f32(rdram, static_cast<int32_t>(camera + 0x03Cu), slot->good[13]);
+        store_f32(rdram, static_cast<int32_t>(camera + 0x040u), slot->good[14]);
+        holds++;
+        std::fprintf(stderr,
+            "[cin:hold] cam=%08X from=(%.1f,%.1f,%.1f) d=(%.1f,%.1f,%.1f) "
+            "dot=%.2f fog=%06X n=%llu\n",
+            camera, px, py, pz, dx, dy, dz, look_dot, fog,
+            static_cast<unsigned long long>(holds));
+        return;
+    }
+
+    load_mtx16(rdram, mtx, slot->good);
+    slot->primed = true;
+    if (!jump && !heartbeat) {
+        return;
+    }
+    std::fprintf(stderr,
+        "[cin:cam] %s cam=%08X pos=(%.1f,%.1f,%.1f) d=(%.1f,%.1f,%.1f) "
+        "lookZ=(%.2f,%.2f,%.2f) dot=%.2f fog=%06X\n",
+        jump ? "JUMP" : "hb", camera, px, py, pz, dx, dy, dz,
+        zx, zy, zz, look_dot, fog);
+}
+
+extern "C" void turok2_patch_pull_camera_eye(uint8_t* rdram, recomp_context* ctx) {
+    // 0x0027D610 in func_0027D160: $a0 is m_mfViewOrient, $s4 is the camera.
+    // func_002101A0 is about to copy the matrix translation into m_vPos, then
+    // the inverse / view / TCorners are all built from that origin. Pulling
+    // here moves the rendered eye, not just the cull volume.
+    //
+    // Local -Z is look (far-plane corners store Z = -far). Opposite look is
+    // therefore +Z of the orientation matrix. TUROK2_NO_EYE_PULL=1 or
+    // TUROK2_EYE_PULL=0 turns this off. Cinema holds a cut instead of pulling.
+    const uint32_t camera = static_cast<uint32_t>(ctx->r20);
+    const uint32_t mtx = static_cast<uint32_t>(ctx->r4);
+    if ((camera < 0x80000000u) || (camera > 0x807FF13Fu) ||
+        (mtx < 0x80000000u) || (mtx > 0x807FF13Fu)) {
+        return;
+    }
+
+    const float zx = load_f32(rdram, static_cast<int32_t>(mtx + 0x20u));
+    const float zy = load_f32(rdram, static_cast<int32_t>(mtx + 0x24u));
+    const float zz = load_f32(rdram, static_cast<int32_t>(mtx + 0x28u));
+    float px = load_f32(rdram, static_cast<int32_t>(mtx + 0x30u));
+    float py = load_f32(rdram, static_cast<int32_t>(mtx + 0x34u));
+    float pz = load_f32(rdram, static_cast<int32_t>(mtx + 0x38u));
+    if (!std::isfinite(zx) || !std::isfinite(zy) || !std::isfinite(zz) ||
+        !std::isfinite(px) || !std::isfinite(py) || !std::isfinite(pz)) {
+        return;
+    }
+
+    if (g_cinema) {
+        cinema_fill_note(rdram, camera);
+        cinema_hold_cut(rdram, camera, mtx, px, py, pz, zx, zy, zz);
+        return;
+    }
+
+    static const bool disabled = env_flag_on("TUROK2_NO_EYE_PULL");
+    if (disabled || camera != kMainCamera) {
+        return;
+    }
+    static const float pull = env_scale_override("TUROK2_EYE_PULL", 10.0f, 0.0f, 40.0f);
+    if (pull <= 0.0f) {
+        return;
+    }
+
+    px += zx * pull;
+    py += zy * pull;
+    pz += zz * pull;
+    store_f32(rdram, static_cast<int32_t>(mtx + 0x30u), px);
+    store_f32(rdram, static_cast<int32_t>(mtx + 0x34u), py);
+    store_f32(rdram, static_cast<int32_t>(mtx + 0x38u), pz);
+
+    const uint32_t view_pos = camera + 0x038u;
+    const float vx = load_f32(rdram, static_cast<int32_t>(view_pos));
+    const float vy = load_f32(rdram, static_cast<int32_t>(view_pos + 4u));
+    const float vz = load_f32(rdram, static_cast<int32_t>(view_pos + 8u));
+    if (std::isfinite(vx) && std::isfinite(vy) && std::isfinite(vz)) {
+        store_f32(rdram, static_cast<int32_t>(view_pos), vx + zx * pull);
+        store_f32(rdram, static_cast<int32_t>(view_pos + 4u), vy + zy * pull);
+        store_f32(rdram, static_cast<int32_t>(view_pos + 8u), vz + zz * pull);
+    }
+
+    static uint64_t calls = 0;
+    if ((calls++ & 255u) == 0u) {
+        std::fprintf(stderr,
+            "[cam:pull] pull=%.1f pos=(%.1f,%.1f,%.1f)\n",
+            pull, px, py, pz);
+    }
+}
+
+extern "C" void turok2_patch_cinema_region(uint8_t* rdram, recomp_context* ctx) {
+    // 0x0027DED8 in func_0027D160: Cinema_PathPlaying was true, so
+    // func_00220A1C looked up the section under camera+0x38. $v0 is about
+    // to land in m_pCurrentRegion (+0x58). Null → no world, fog-colored
+    // letterbox frame. A brand-new pointer is the first frame of a cut
+    // before that section's vis is live. Hold the last good pointer for
+    // that one Draw. TUROK2_NO_REGION_HOLD=1 disables.
+    (void)rdram;
+    if (!g_cinema) {
+        return;
+    }
+    static const bool disabled = env_flag_on("TUROK2_NO_REGION_HOLD");
+    const uint32_t camera = static_cast<uint32_t>(ctx->r20);
+    const uint32_t incoming = static_cast<uint32_t>(ctx->r2);
+    const bool valid = guest_kseg0(incoming);
+
+    struct RegionHold {
+        uint32_t cam = 0;
+        uint32_t last = 0;
+    };
+    static RegionHold slots[4];
+    RegionHold* slot = &slots[0];
+    for (uint32_t i = 0; i < 4; ++i) {
+        if (slots[i].cam == camera) {
+            slot = &slots[i];
+            break;
+        }
+        if (slots[i].cam == 0u) {
+            slots[i].cam = camera;
+            slot = &slots[i];
+            break;
+        }
+    }
+    slot->cam = camera;
+
+    static bool announced = false;
+    if (!announced) {
+        announced = true;
+        std::fprintf(stderr, "[cin:region] %s\n", disabled ? "off" : "on");
+    }
+
+    // FAILED eye-test 2026-09-05: SWITCH hold keeps the old section while
+    // the eye is already in the new room (~16 fog frames, same count as
+    // the flats). Long NULL runs are the 2D Primagen block — forcing a
+    // 3D section there is wrong. Log only.
+    if (valid) {
+        if (slot->last != 0u && incoming != slot->last) {
+            std::fprintf(stderr,
+                "[cin:region] SWITCH cam=%08X from=%08X to=%08X\n",
+                camera, slot->last, incoming);
+        }
+        slot->last = incoming;
+        return;
+    }
+    static uint64_t nulls = 0;
+    if ((nulls++ & 63u) == 0u) {
+        std::fprintf(stderr, "[cin:region] NULL cam=%08X last=%08X n=%llu\n",
+                     camera, slot->last, static_cast<unsigned long long>(nulls));
+    }
+}
+
+extern "C" int turok2_cinema_skip_this_camera(uint8_t* rdram, recomp_context* ctx) {
+    // FAILED eye-test 2026-09-05: [cin:skip] fired on 806FF120 and the
+    // Primagen flats stayed. Dual-Draw is not the cause. Opt-in only.
+    if (!g_cinema) {
+        return 0;
+    }
+    static const bool enabled = env_flag_on("TUROK2_SKIP_MAIN");
+    if (!enabled) {
+        return 0;
+    }
+    const uint32_t camera = static_cast<uint32_t>(ctx->r4);
+    if (camera != kMainCamera) {
+        return 0;
+    }
+    const uint32_t path = static_cast<uint32_t>(MEM_W(static_cast<int32_t>(kCamPool + 0x20u), 0));
+    if (!guest_kseg0(path) || path == kMainCamera) {
+        return 0;
+    }
+    static uint64_t skips = 0;
+    if ((skips++ & 255u) == 0u) {
+        std::fprintf(stderr, "[cin:skip] main=%08X path=%08X n=%llu\n",
+                     camera, path, static_cast<unsigned long long>(skips));
+    }
+    return 1;
+}
+
 extern "C" void turok2_patch_widen_camera_culling(uint8_t* rdram,
                                                      recomp_context* ctx) {
     // CCamera::m_vTCorners at +0x24C contains the camera origin followed by
@@ -1133,12 +1822,12 @@ extern "C" void turok2_patch_widen_camera_culling(uint8_t* rdram,
     // them. TUROK2_WIDE_CULL_SCALE cannot express a true no-op: it clamps to
     // 1.0 and is then multiplied by the FOV factor, so the lowest reachable
     // scale still expands the corners and still stores them back.
+    const uint32_t camera = static_cast<uint32_t>(ctx->r20);
+    adon_cover_note_camera(rdram, camera);
     static const bool cull_off = env_flag_on("TUROK2_WIDE_CULL_OFF");
     if (cull_off) {
         return;
     }
-
-    const uint32_t camera = static_cast<uint32_t>(ctx->r20);
     if ((camera < 0x80000000u) || (camera > 0x807FF13Fu)) {
         return;
     }
@@ -1174,11 +1863,12 @@ extern "C" void turok2_patch_widen_camera_culling(uint8_t* rdram,
 
 extern "C" void turok2_patch_fog_position(uint8_t* rdram, recomp_context* ctx) {
     (void)rdram;
-    // 0x0027E530 in func_0027E000. $a2 is gSPFogPosition min (0–1000).
-    // fm = 128000 / (1000 - min) is packed as int16. min=999 → fm=128000
-    // wraps and washes the whole framebuffer to fog color (seen in Adia).
-    // Safe ceiling is 996 (fm=32000). Authored T2 min is already 995 —
-    // leave it. Only push heavy fog (min < 900) toward that ceiling.
+    // 0x0027E530 in func_0027E000. $a2 is gSPFogPosition min (0–1000),
+    // the low 16 of CCamera.m_FogStart. fm = 128000 / (1000 - min) is
+    // packed as int16. min>=997 wraps (Adia wash); min==1000 divides by
+    // zero. Always cap at 996. Authored T2 is 995, so the ceiling is a
+    // no-op until a region set spikes. Also push heavy fog (min < 900)
+    // toward that ceiling by the far/fog slider.
     uint32_t min = static_cast<uint32_t>(ctx->r6) & 0xFFFFu;
     if (min > 1000u) {
         min = 1000u;
@@ -1195,13 +1885,23 @@ extern "C" void turok2_patch_fog_position(uint8_t* rdram, recomp_context* ctx) {
         }
         min = static_cast<uint32_t>(pushed);
     }
+    if (min > 996u) {
+        min = 996u;
+    }
 
     ctx->r6 = static_cast<int32_t>(min);
+    g_turok2_adon_fog_min_in.store(authored, std::memory_order_relaxed);
+    g_turok2_adon_fog_min.store(min, std::memory_order_relaxed);
 
+    static uint32_t last_in = 0xFFFFFFFFu;
     static uint64_t calls = 0;
-    if ((calls++ & 255u) == 0u) {
-        std::fprintf(stderr, "[fog:pos] min %u -> %u scale=%.3f\n",
-                     authored, min, fog_distance_scale());
+    const bool spike = authored > 996u;
+    const bool changed = authored != last_in;
+    last_in = authored;
+    if (spike || changed || ((calls++ & 255u) == 0u)) {
+        std::fprintf(stderr, "[fog:pos] min %u -> %u scale=%.3f%s\n",
+                     authored, min, fog_distance_scale(),
+                     spike ? " WRAP" : "");
     }
 }
 
@@ -1673,6 +2373,17 @@ extern "C" void turok2_patch_direct_mouse_look(uint8_t* rdram, recomp_context* c
     bool captured = false;
     turok2_take_mouse_deltas(&dx, &dy, &captured);
 
+    // Direct mouse can slam tens of degrees in one 120 Hz Update. The N64
+    // stick curve never did that, and the constructed eye / near plane then
+    // sits inside the stair riser or ceiling for a frame. Cap is per Update,
+    // not per second: leftover frames still add up to a fast look.
+    static const bool no_look_cap = env_flag_on("TUROK2_NO_LOOK_CAP");
+    if (!no_look_cap) {
+        const float cap = env_scale_override("TUROK2_LOOK_CAP", 0.10f, 0.02f, 0.50f);
+        dx = std::clamp(dx, -cap, cap);
+        dy = std::clamp(dy, -cap, cap);
+    }
+
     // At 0x0024F154 func_0024EF70 has finished the authored analog path. s1 is
     // the player and s2 is its active rotation target. Apply the raw X/Y pair
     // together after that path so neither axis sees stick acceleration,
@@ -1721,6 +2432,217 @@ extern "C" void turok2_patch_direct_mouse_look(uint8_t* rdram, recomp_context* c
     if (native_pitch_active && pitch_player_addr == player_addr) {
         store_f32(rdram, static_cast<int32_t>(pitch_addr), native_pitch);
     }
+}
+
+// CParticle.m_vLastPos (+0x144) is copied from m_vPos every unique Update
+// at 0x0022B538, then Draw (func_00232934) does pos − lastPos for the
+// tracer. func_00239F00 already integrates × increment, so travel is
+// real-time; the ribbon is one unique step (4× shorter at 120). Delay
+// the snapshot by (authored_steps − 1) so lastPos→pos stays one 30 Hz
+// step. A shared skip-copy leftover would pulse 1↔4 and flicker.
+// TUROK2_NO_LASTPOS_HOLD=1 restores the raw unique-rate copy.
+extern "C" void turok2_patch_lastpos_hold(uint8_t* rdram, recomp_context* ctx) {
+    static const bool disabled = env_flag_on("TUROK2_NO_LASTPOS_HOLD");
+    if (disabled || preserve_authored_cadence()) {
+        return;
+    }
+
+    const uint32_t particle = static_cast<uint32_t>(ctx->r20);
+    if (!guest_kseg0(particle)) {
+        return;
+    }
+
+    const float scale = visual_step_scale(rdram);
+    if (scale <= 0.0f || scale >= 0.999f) {
+        return;
+    }
+    int delay = static_cast<int>(std::lround(1.0f / scale)) - 1;
+    if (delay < 1) {
+        return;
+    }
+    if (delay > 7) {
+        delay = 7;
+    }
+
+    struct LastPosSample {
+        uint32_t x = 0;
+        uint32_t y = 0;
+        uint32_t z = 0;
+    };
+    struct LastPosHist {
+        LastPosSample ring[7];
+        int delay = 0;
+        int head = 0;
+        bool armed = false;
+    };
+    static std::unordered_map<uint32_t, LastPosHist> hist;
+
+    const float increment = load_f32(rdram, kFrameIncrement);
+    const float c_frame = load_f32(rdram, static_cast<int32_t>(particle + 0x11C));
+    const bool respawn = !std::isfinite(c_frame) ||
+                         (std::isfinite(increment) && increment > 0.0f &&
+                          c_frame <= increment * 1.5f);
+
+    LastPosHist& slot = hist[particle];
+    const LastPosSample current{
+        static_cast<uint32_t>(ctx->r9),
+        static_cast<uint32_t>(ctx->r10),
+        static_cast<uint32_t>(ctx->r11),
+    };
+
+    if (respawn || !slot.armed || slot.delay != delay) {
+        slot.delay = delay;
+        slot.head = 0;
+        slot.armed = true;
+        for (int i = 0; i < delay; ++i) {
+            slot.ring[i] = current;
+        }
+        return;
+    }
+
+    const LastPosSample delayed = slot.ring[slot.head];
+    slot.ring[slot.head] = current;
+    slot.head = (slot.head + 1) % delay;
+    ctx->r9 = delayed.x;
+    ctx->r10 = delayed.y;
+    ctx->r11 = delayed.z;
+}
+
+// CParticle Advance (func_00230CB4 @ 0x00230DF8): nFrames==1 skips the
+// increment lifetime and dies on the first unique Update, and the
+// cFrame >= nFrames compare kills the same sprite again once cFrame
+// reaches 1 (~66 ms at unique 120). Authored 30 Hz that is one 33 ms
+// flash; unique 120 is one 8 ms flash. The previous Advance-count hold
+// sat after bc1f and could not outlive that compare, so the barrel
+// blast still winked out. Hold both death branches on wall-clock 30/s
+// for 8 authored frames (~267 ms) so a oneshot fireball stays on
+// screen. Do not leftover-hold m_cFrame += increment: D_800A9E18 is 1.0
+// and that path is already real-time. Opt-out: TUROK2_NO_EXPLOSION_HOLD=1.
+static void store_f1(recomp_context* ctx, float value) {
+    ctx->f1.fl = value;
+    if (ctx->f_odd != nullptr) {
+        uint32_t bits = 0;
+        std::memcpy(&bits, &value, sizeof(bits));
+        ctx->f_odd[0] = bits;
+    }
+}
+
+extern "C" void turok2_patch_oneshot_particle_hold(uint8_t* rdram,
+                                                  recomp_context* ctx) {
+    static const bool disabled = env_flag_on("TUROK2_NO_EXPLOSION_HOLD");
+    if (disabled || preserve_authored_cadence()) {
+        return;
+    }
+    if (static_cast<int32_t>(ctx->r2) != 1) {
+        return;
+    }
+
+    const uint32_t particle = static_cast<uint32_t>(ctx->r16);
+    if (!guest_kseg0(particle)) {
+        return;
+    }
+
+    static std::unordered_map<uint32_t, LeftoverClock> accum;
+    LeftoverClock& clock = accum[particle];
+    const auto now = std::chrono::steady_clock::now();
+    if (!clock.armed) {
+        clock.armed = true;
+        clock.last = now;
+        clock.held = 0.0f;
+    } else {
+        const float dt = std::chrono::duration<float>(now - clock.last).count();
+        clock.last = now;
+        clock.held += std::min(dt, 0.05f) * 30.0f;
+    }
+    // 8 authored 30 Hz frames. One unique step (33 ms) still reads as
+    // a wink; a short fireball is closer to 8/30 s.
+    constexpr float kOneshotAuthoredFrames = 8.0f;
+    if (clock.held < kOneshotAuthoredFrames) {
+        store_f1(ctx, 0.0f);
+        ctx->r2 = 2;
+        return;
+    }
+    accum.erase(particle);
+}
+
+// Same Advance (func_00230CB4 @ 0x00231128): nearby particles get
+// nFrames forced to 1, then the oneshot death path. A barrel blast is
+// a cluster, so every sprite collapsed to a 33 ms flash even when the
+// ROM flipbook was 8–15 frames (increment-correct, ~0.5 s). Keep the
+// authored nFrames so the increment lifetime can play. Opt-out shares
+// TUROK2_NO_EXPLOSION_HOLD=1.
+extern "C" void turok2_patch_particle_nframes_cull(uint8_t* rdram,
+                                                  recomp_context* ctx) {
+    static const bool disabled = env_flag_on("TUROK2_NO_EXPLOSION_HOLD");
+    if (disabled || preserve_authored_cadence()) {
+        return;
+    }
+    const uint32_t particle = static_cast<uint32_t>(ctx->r16);
+    if (!guest_kseg0(particle)) {
+        return;
+    }
+    const int16_t n_frames =
+        static_cast<int16_t>(MEM_H(static_cast<int32_t>(particle), 0x128));
+    if (n_frames > 1) {
+        ctx->r12 = static_cast<uint32_t>(n_frames);
+    }
+}
+
+// CFxTimer tick (func_002367A0 @ 0x002367E0): m_Time -= increment is
+// real-time, then fire + m_Count -= 1. Spacing below one authored step
+// (0.5 gameplay / 1.0 cinema) expires every unique Update, so a burst of
+// N callbacks lasts N/120 s instead of N/30 s. Cap the fire path at 30/s
+// only for those short spacings. Leave increment-correct spacing alone.
+extern "C" void turok2_patch_fx_timer_fire_hold(uint8_t* rdram,
+                                               recomp_context* ctx) {
+    static const bool disabled = env_flag_on("TUROK2_NO_EXPLOSION_HOLD");
+    if (disabled || preserve_authored_cadence()) {
+        return;
+    }
+
+    const uint32_t timer = static_cast<uint32_t>(ctx->r16);
+    if (!guest_kseg0(timer)) {
+        return;
+    }
+
+    const float time = ctx->f1.fl;
+    if (!std::isfinite(time) || time > 0.0f) {
+        return;
+    }
+
+    const float increment = load_f32(rdram, kFrameIncrement);
+    if (!std::isfinite(increment) || increment <= 0.0f) {
+        return;
+    }
+
+    const float spacing = load_f32(rdram, static_cast<int32_t>(timer + 0x0C));
+    const float authored_step = g_cinema ? 1.0f : 0.5f;
+    if (std::isfinite(spacing) && spacing >= authored_step * 0.75f) {
+        return;
+    }
+
+    static std::unordered_map<uint32_t, LeftoverClock> accum;
+    LeftoverClock& clock = accum[timer];
+    const auto now = std::chrono::steady_clock::now();
+    if (!clock.armed) {
+        clock.armed = true;
+        clock.last = now;
+    } else {
+        const float dt = std::chrono::duration<float>(now - clock.last).count();
+        clock.last = now;
+        clock.held += std::min(dt, 0.05f) * 30.0f;
+    }
+    if (clock.held < 1.0f) {
+        ctx->f1.fl = increment;
+        if (ctx->f_odd != nullptr) {
+            uint32_t bits = 0;
+            std::memcpy(&bits, &increment, sizeof(bits));
+            ctx->f_odd[0] = bits;
+        }
+        store_f32(rdram, static_cast<int32_t>(timer + 0x08), increment);
+        return;
+    }
+    clock.held -= 1.0f;
 }
 
 // Legacy explicit helper retained for ABI compatibility with older generated

@@ -1606,6 +1606,8 @@ L_002367CC:
     ctx->f1.fl = ctx->f1.fl - ctx->f0.fl;
     // 0x002367DC: lw          $s1, 0x4($s0)
     ctx->r17 = MEM_W(ctx->r16, 0X4);
+        turok2_patch_fx_timer_fire_hold(rdram, ctx);
+
     // 0x002367E0: c.le.s      $f1, $f20
     CHECK_FR(ctx, 1);
     CHECK_FR(ctx, 20);

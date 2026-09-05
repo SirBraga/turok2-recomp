@@ -1,0 +1,61 @@
+# Smoke-test N64Recomp config for the Rev.01 / crash-screen rebuild.
+# Does not replace projects/turok2-decomp/turok2.us.toml.
+
+[input]
+# Boot stub is CP0/TLB. Host runtime must call 0x00274FD0, same idea as
+# US 1.0 skipping boot_main and entering entry_0028D380.
+rom_file_path = "baserom.z64"
+symbols_file_path = "turok2.rev01.syms.toml"
+output_func_path = "RecompiledFuncs"
+use_absolute_symbols = true
+
+[patches]
+# Smoke-pass refusals. Many are bad prologue boundaries, not proven CP0.
+# Do not copy this list into the US 1.0 port.
+stubs = [
+    "func_00250284",
+    "func_0024E5E0",
+    "func_0024DA6C",
+    "func_0024D828",
+    "func_0024D80C",
+    "func_0024D27C",
+    "func_0024D1D8",
+    "func_0024D1A0",
+    "func_0024D088",
+    "func_0024CF2C",
+    "func_0024901C",
+    "func_00248FC8",
+    "func_00248BA4",
+    "func_00248A8C",
+    "func_00248A30",
+    "func_00248230",
+    "func_00247BE8",
+    "func_00247B70",
+    "func_00247984",
+    "func_002477A0",
+    "func_00247748",
+    "func_0024634C",
+    "func_00245BEC",
+    "func_00242044",
+    "func_00241D70",
+    "func_00241BA0",
+    "func_0023F68C",
+    "func_0023F124",
+    "func_0023B27C",
+    "func_0023B1CC",
+    "func_0023B168",
+    "func_00236368",
+    "func_0022D964",
+    "func_0022C040",
+    "func_0022090C",
+    "func_0021E8D0",
+    "func_0021A560",
+    "func_0021A250",
+    "func_00218DE4",
+    "func_00212F58",
+    "func_0020245C",
+    "func_80000400",
+    "func_80000488",
+    "func_002009DC",
+]
+ignored = []

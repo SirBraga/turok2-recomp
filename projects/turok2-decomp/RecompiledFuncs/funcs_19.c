@@ -2454,7 +2454,9 @@ L_0027EFCC:
     // 0x0027F04C: jal         0x0027D160
     // 0x0027F050: addiu       $a0, $s4, 0x40
     ctx->r4 = ADD32(ctx->r20, 0X40);
-    func_0027D160(rdram, ctx);
+    if (!turok2_cinema_skip_this_camera(rdram, ctx)) {
+        func_0027D160(rdram, ctx);
+    }
         goto after_13;
     // 0x0027F050: addiu       $a0, $s4, 0x40
     ctx->r4 = ADD32(ctx->r20, 0X40);

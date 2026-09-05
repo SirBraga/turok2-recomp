@@ -15,6 +15,7 @@
 #include "common/rt64_thread.h"
 
 #include "rt64_present_queue.h"
+#include "hle/rt64_turok2_adon_cover.h"
 
 #define ENABLE_HIGH_RESOLUTION_RENDERER 1
 
@@ -1028,15 +1029,24 @@ namespace RT64 {
                                 }
                             }
 
+                            const Turok2AdonCover cover = turok2_adon_cover_copy();
                             std::fprintf(stderr,
-                                "[rect] color=%08X pair=%d/%u calls=%u scene=%d empty=%d w=%d h=%d fullRects=%u\n",
+                                "[rect] color=%08X pair=%d/%u calls=%u scene=%d empty=%d w=%d h=%d fullRects=%u "
+                                "draw=%u fc=%u cinema=%u fade=%.3f fst=%u cam=%08X flash=%d/%u rgb=%02X%02X%02X "
+                                "fog=%02X%02X%02X skip=%u rebuild=%u\n",
                                 fbPair.colorImage.address, f, workload.fbPairCount,
                                 fbPair.gameCallCount,
                                 fbPair.hasSceneProjection() ? 1 : 0,
                                 fbPair.drawColorRect.isEmpty() ? 1 : 0,
                                 fbPair.drawColorRect.isEmpty() ? 0 : fbPair.drawColorRect.width(false, true),
                                 fbPair.drawColorRect.isEmpty() ? 0 : fbPair.drawColorRect.height(false, true),
-                                fullRects);
+                                fullRects,
+                                cover.draw, cover.frame_count, cover.cinema,
+                                cover.fade_alpha, cover.fade_status, cover.cam,
+                                cover.flash_mode, cover.flash,
+                                cover.flash_r, cover.flash_g, cover.flash_b,
+                                cover.fog_r, cover.fog_g, cover.fog_b,
+                                cover.lsb_skip, cover.lsb_rebuild);
                         }
 
                         if (fbPair.drawColorRect.isEmpty()) {

@@ -3982,6 +3982,8 @@ L_00230DE8:
     CHECK_FR(ctx, 0);
     CHECK_FR(ctx, 0);
     ctx->f0.fl = CVT_S_W(ctx->f0.u32l);
+        turok2_patch_oneshot_particle_hold(rdram, ctx);
+
     // 0x00230DF8: c.lt.s      $f1, $f0
     CHECK_FR(ctx, 1);
     CHECK_FR(ctx, 0);
@@ -4626,6 +4628,8 @@ L_002310D4:
     ctx->r17 = ADD32(ctx->r17, 0X1);
     // 0x00231124: addiu       $t4, $zero, 0x1
     ctx->r12 = ADD32(0, 0X1);
+        turok2_patch_particle_nframes_cull(rdram, ctx);
+
     // 0x00231128: sh          $t4, 0x128($s0)
     MEM_H(0X128, ctx->r16) = ctx->r12;
 L_0023112C:

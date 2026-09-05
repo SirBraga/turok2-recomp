@@ -1294,6 +1294,16 @@ text = """
     turok2_patch_scale_wave_index(rdram, ctx);
 """
 
+# CGameSimpleInstance.m_DrawFrame (obj+0x194) vs gFrameCount LSB (0x6D1B).
+# After lbu $v0, 0x6D1B; $v1 is the cached stamp. Do not leftover the LSB —
+# that skips the orientation write while 0x6D1C still flips. Force dirty.
+[[patches.hook]]
+func = "func_002152AC"
+before_vram = 0x002152E0
+text = """
+    turok2_patch_frame_lsb_dirty(rdram, ctx);
+"""
+
 # Object wave / material UV indexed by raw gFrameCount (water + totem energy).
 [[patches.hook]]
 func = "func_00213E90"
@@ -1379,6 +1389,29 @@ before_vram = 0x0027E530
 text = """
     turok2_patch_fog_position(rdram, ctx);
 """
+
+# Pull the constructed eye back along look before m_vPos is copied out of
+# m_mfViewOrient. Gameplay only; cinema cameras are skipped in the hook.
+[[patches.hook]]
+func = "func_0027D160"
+before_vram = 0x0027D610
+text = """
+    turok2_patch_pull_camera_eye(rdram, ctx);
+"""
+
+# Cinema only: func_00220A1C just returned the region under camera+0x38.
+# Measure-only after the SWITCH hold failed the eye-test (old section +
+# new eye = fog, same count as the flats).
+[[patches.hook]]
+func = "func_0027D160"
+before_vram = 0x0027DED8
+text = """
+    turok2_patch_cinema_region(rdram, ctx);
+"""
+
+# CCameraPool::Draw always submits main first. Skip that jal while a
+# path camera is on the +0x20 list. Implemented as a wrap in funcs_19.c
+# (a hook cannot skip the jal). TUROK2_NO_SKIP_MAIN=1 restores both.
 
 # Turok 2 builds its CPU culling volume from five transformed camera points.
 # Scale gameplay FOV/far after Cinema_PathPlaying returns and before
@@ -1534,6 +1567,48 @@ func = "func_0024EF70"
 before_vram = 0x0024F154
 text = """
     turok2_patch_direct_mouse_look(rdram, ctx);
+"""
+
+# CParticle.m_vLastPos is snapshotted every unique Update, then Draw builds
+# the tracer from lastPos→pos (func_00232934). Travel is already × increment
+# (func_00239F00); the streak is not. Delay the copy so the ribbon stays one
+# authored 30 Hz step long. Live body is func_0022AFB4, not the merged
+# func_00228C38 copy after jr $ra. Opt-out: TUROK2_NO_LASTPOS_HOLD=1.
+[[patches.hook]]
+func = "func_0022AFB4"
+before_vram = 0x0022B538
+text = """
+    turok2_patch_lastpos_hold(rdram, ctx);
+"""
+
+# nFrames==1 particles die on the first unique Advance, and cFrame>=1
+# kills them again at ~66 ms. Hold both compares before c.lt.s so a
+# oneshot fireball lasts 8 authored 30 Hz frames. Live body is
+# func_00230CB4. Opt-out: TUROK2_NO_EXPLOSION_HOLD=1.
+[[patches.hook]]
+func = "func_00230CB4"
+before_vram = 0x00230DF8
+text = """
+    turok2_patch_oneshot_particle_hold(rdram, ctx);
+"""
+
+# Nearby particles get nFrames forced to 1, which collapses a barrel
+# cluster to oneshot flashes. Keep the authored flipbook length.
+[[patches.hook]]
+func = "func_00230CB4"
+before_vram = 0x00231128
+text = """
+    turok2_patch_particle_nframes_cull(rdram, ctx);
+"""
+
+# CFxTimer fire when m_Spacing is below one authored step. Time -=
+# increment is already real-time; the 4× short burst is fire-every-
+# unique-Update + m_Count -= 1. Cap fires at 30/s for those timers.
+[[patches.hook]]
+func = "func_002367A0"
+before_vram = 0x002367E0
+text = """
+    turok2_patch_fx_timer_fire_hold(rdram, ctx);
 """
 
 # Prevent div by zero on cheat screen

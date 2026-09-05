@@ -956,6 +956,7 @@ L_0027D5E4:
     ctx->r17 = ADD32(ctx->r20, 0X14C);
     // 0x0027D60C: addu        $a0, $s1, $zero
     ctx->r4 = ADD32(ctx->r17, 0);
+        turok2_patch_pull_camera_eye(rdram, ctx);
     // 0x0027D610: jal         0x002101A0
     // 0x0027D614: addiu       $a1, $s4, 0x114
     ctx->r5 = ADD32(ctx->r20, 0X114);
@@ -2862,6 +2863,7 @@ L_0027DEA4:
     // 0x0027DED4: addiu       $a1, $s4, 0x38
     ctx->r5 = ADD32(ctx->r20, 0X38);
     after_92:
+        turok2_patch_cinema_region(rdram, ctx);
     // 0x0027DED8: sw          $v0, 0x58($s4)
     MEM_W(0X58, ctx->r20) = ctx->r2;
 L_0027DEDC:

@@ -12,6 +12,7 @@
 #include "rhi/rt64_render_hooks.h"
 
 #include "rt64_workload_queue.h"
+#include "hle/rt64_turok2_adon_cover.h"
 
 namespace RT64 {
     static bool viRowCorrectedAddress(const VI &vi, uint32_t &correctedAddress) {
@@ -412,8 +413,10 @@ namespace RT64 {
                 static uint64_t presentTraceIndex = 0;
                 if (presentTrace) {
                     presentTraceIndex++;
+                    const Turok2AdonCover cover = turok2_adon_cover_copy();
                     std::fprintf(stderr,
-                        "[trace] n=%llu vi=%08X fb=%08X shownFill=%d shownNoScene=%d liveFill=%d liveNoScene=%d inSet=%d presentable=%d colors=%zu interp=%d\n",
+                        "[trace] n=%llu vi=%08X fb=%08X shownFill=%d shownNoScene=%d liveFill=%d liveNoScene=%d inSet=%d presentable=%d colors=%zu interp=%d "
+                        "draw=%u fc=%u cinema=%u fade=%.3f fst=%u cam=%08X flash=%d/%u rgb=%02X%02X%02X fog=%02X%02X%02X skip=%u rebuild=%u live=%u\n",
                         static_cast<unsigned long long>(presentTraceIndex),
                         present.screenVI.fbAddress(),
                         presentFb->addressStart,
@@ -427,7 +430,13 @@ namespace RT64 {
                         (colorSet.find(presentFb->addressStart) != colorSet.end()) ? 1 : 0,
                         presentable(presentFb->addressStart) ? 1 : 0,
                         ext.sharedResources->colorImageAddressVector.size(),
-                        presentFb->interpolationEnabled ? 1 : 0);
+                        presentFb->interpolationEnabled ? 1 : 0,
+                        cover.draw, cover.frame_count, cover.cinema,
+                        cover.fade_alpha, cover.fade_status, cover.cam,
+                        cover.flash_mode, cover.flash,
+                        cover.flash_r, cover.flash_g, cover.flash_b,
+                        cover.fog_r, cover.fog_g, cover.fog_b,
+                        cover.lsb_skip, cover.lsb_rebuild, cover.live);
                 }
 
                 RenderTargetKey colorTargetKey(presentFb->addressStart, presentFb->width, presentFb->siz, Framebuffer::Type::Color);

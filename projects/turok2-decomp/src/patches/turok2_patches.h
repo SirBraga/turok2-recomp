@@ -29,6 +29,7 @@ void turok2_patch_wave_every_update(uint8_t* rdram, recomp_context* ctx);
 void turok2_patch_scale_wave_index(uint8_t* rdram, recomp_context* ctx);
 void turok2_patch_scale_frame_a1(uint8_t* rdram, recomp_context* ctx);
 void turok2_patch_scale_frame_t0(uint8_t* rdram, recomp_context* ctx);
+void turok2_patch_frame_lsb_dirty(uint8_t* rdram, recomp_context* ctx);
 void turok2_patch_scale_frame_count(uint8_t* rdram, recomp_context* ctx);
 void turok2_patch_scale_frame_aux(uint8_t* rdram, recomp_context* ctx);
 void turok2_patch_scale_frontend_hold(uint8_t* rdram, recomp_context* ctx);
@@ -37,6 +38,9 @@ void turok2_patch_scale_anim_repeat(uint8_t* rdram, recomp_context* ctx);
 void turok2_patch_scale_hud_timer(uint8_t* rdram, recomp_context* ctx);
 void turok2_patch_retrace_guard(uint8_t* rdram, recomp_context* ctx);
 void turok2_patch_gameplay_camera(uint8_t* rdram, recomp_context* ctx);
+void turok2_patch_pull_camera_eye(uint8_t* rdram, recomp_context* ctx);
+void turok2_patch_cinema_region(uint8_t* rdram, recomp_context* ctx);
+int turok2_cinema_skip_this_camera(uint8_t* rdram, recomp_context* ctx);
 void turok2_patch_fog_position(uint8_t* rdram, recomp_context* ctx);
 void turok2_patch_widen_camera_culling(uint8_t* rdram, recomp_context* ctx);
 void turok2_patch_fix_jalr(uint8_t* rdram, recomp_context* ctx);
@@ -54,6 +58,10 @@ void turok2_patch_sanitize_anim(uint8_t* rdram, recomp_context* ctx);
 void turok2_patch_player_controls(uint8_t* rdram, recomp_context* ctx);
 void turok2_patch_disable_lookspring(uint8_t* rdram, recomp_context* ctx);
 void turok2_patch_direct_mouse_look(uint8_t* rdram, recomp_context* ctx);
+void turok2_patch_lastpos_hold(uint8_t* rdram, recomp_context* ctx);
+void turok2_patch_oneshot_particle_hold(uint8_t* rdram, recomp_context* ctx);
+void turok2_patch_particle_nframes_cull(uint8_t* rdram, recomp_context* ctx);
+void turok2_patch_fx_timer_fire_hold(uint8_t* rdram, recomp_context* ctx);
 void turok2_patch_projectile_clear_flag(uint8_t* rdram, recomp_context* ctx);
 
 #ifdef __cplusplus

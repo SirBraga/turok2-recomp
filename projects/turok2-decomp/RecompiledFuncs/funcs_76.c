@@ -1717,6 +1717,7 @@ RECOMP_FUNC void func_002152AC(uint8_t* rdram, recomp_context* ctx) {
     ctx->r2 = S32(0X800B << 16);
     // 0x002152DC: lbu         $v0, 0x6D1B($v0)
     ctx->r2 = MEM_BU(ctx->r2, 0X6D1B);
+        turok2_patch_frame_lsb_dirty(rdram, ctx);
     // 0x002152E0: beq         $v1, $v0, L_00215388
     if (ctx->r3 == ctx->r2) {
         // 0x002152E4: nop

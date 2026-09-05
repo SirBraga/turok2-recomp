@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstring>
 #include <mutex>
+#include <vector>
 
 namespace {
 struct GuestSnapshot {
@@ -16,6 +17,39 @@ struct GuestSnapshot {
 
 thread_local GuestSnapshot g_snapshot;
 std::mutex g_report_mutex;
+std::mutex g_os_reg_mutex;
+std::vector<Turok2OsRef> g_osthreads;
+std::vector<Turok2OsRef> g_mesg_queues;
+
+void add_os_ref(std::vector<Turok2OsRef>& list, uint32_t addr, uint32_t extra,
+                size_t cap) {
+    if (addr < 0x80000000u || addr >= 0x80800000u) {
+        return;
+    }
+    for (Turok2OsRef& existing : list) {
+        if (existing.addr == addr) {
+            existing.extra = extra;
+            return;
+        }
+    }
+    if (list.size() >= cap) {
+        return;
+    }
+    list.push_back(Turok2OsRef{addr, extra});
+}
+
+void copy_os_refs(const std::vector<Turok2OsRef>& list, Turok2OsRef* out,
+                  size_t* count, size_t cap) {
+    const size_t n = list.size() < cap ? list.size() : cap;
+    if (out != nullptr) {
+        for (size_t i = 0; i < n; ++i) {
+            out[i] = list[i];
+        }
+    }
+    if (count != nullptr) {
+        *count = n;
+    }
+}
 
 bool guest_word_address(uint32_t address) {
     if ((address >= 0x80000000u) && (address <= 0x807FFFFCu)) return true;
@@ -119,6 +153,26 @@ void turok2_diag_report(const char* reason, uint8_t* rdram,
     print_guest_stack(rdram, *ctx);
     std::fprintf(stderr, "[guest-crash] END REPORT\n\n");
     std::fflush(stderr);
+}
+
+extern "C" void turok2_register_osthread(uint32_t addr, uint32_t stack_top) {
+    std::lock_guard<std::mutex> lock(g_os_reg_mutex);
+    add_os_ref(g_osthreads, addr, stack_top, 32);
+}
+
+extern "C" void turok2_register_mesg_queue(uint32_t addr, uint32_t msg_count) {
+    std::lock_guard<std::mutex> lock(g_os_reg_mutex);
+    add_os_ref(g_mesg_queues, addr, msg_count, 64);
+}
+
+void turok2_copy_osthreads(Turok2OsRef* out, size_t* count, size_t cap) {
+    std::lock_guard<std::mutex> lock(g_os_reg_mutex);
+    copy_os_refs(g_osthreads, out, count, cap);
+}
+
+void turok2_copy_mesg_queues(Turok2OsRef* out, size_t* count, size_t cap) {
+    std::lock_guard<std::mutex> lock(g_os_reg_mutex);
+    copy_os_refs(g_mesg_queues, out, count, cap);
 }
 
 void turok2_diag_report_signal(int signal_number) {

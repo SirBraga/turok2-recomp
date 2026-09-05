@@ -238,7 +238,10 @@ static bool turok_host_key_reserved_for_filter(SDL_Scancode scancode, bool inspe
     case SDL_SCANCODE_F1: // Host toggles inspector; do not let RT64 also handle it.
     case SDL_SCANCODE_F2: // Host texture dump, not RT64 ray tracing.
     case SDL_SCANCODE_F5:
+    case SDL_SCANCODE_5:
     case SDL_SCANCODE_F7:
+    case SDL_SCANCODE_7:
+    case SDL_SCANCODE_KP_7:
     case SDL_SCANCODE_F8:
     case SDL_SCANCODE_F9:
     case SDL_SCANCODE_F10:

@@ -644,18 +644,26 @@ void update_gfx(void*) {
                     // Enter opens the pause/menu layer. Release relative mode so
                     // WASD navigates menus until the game view is clicked again.
                     set_mouse_grabbed(false);
+                } else if (event.key.repeat == 0 &&
+                           (event.key.keysym.scancode == SDL_SCANCODE_F5 ||
+                            event.key.keysym.scancode == SDL_SCANCODE_5 ||
+                            event.key.keysym.scancode == SDL_SCANCODE_F7 ||
+                            event.key.keysym.scancode == SDL_SCANCODE_7 ||
+                            event.key.keysym.scancode == SDL_SCANCODE_KP_7) &&
+                           !recomp_config_open()) {
+                    // Save/load must work while the N64 pause layer or a
+                    // capturing overlay is up. Only the Graphics modal eats
+                    // these keys. Mac F7 is often a media key — 7 still loads.
+                    if (event.key.keysym.scancode == SDL_SCANCODE_F5 ||
+                        event.key.keysym.scancode == SDL_SCANCODE_5) {
+                        turok2_debug_request_save();
+                    } else {
+                        turok2_debug_request_load();
+                    }
                 } else if (event.key.repeat == 0 && !menu_open) {
                     switch (event.key.keysym.scancode) {
                     case SDL_SCANCODE_F3:
                         turok2_debug_toggle_hud();
-                        break;
-                    case SDL_SCANCODE_F5:
-                    case SDL_SCANCODE_5:
-                        turok2_debug_request_save();
-                        break;
-                    case SDL_SCANCODE_F7:
-                    case SDL_SCANCODE_7:
-                        turok2_debug_request_load();
                         break;
                     case SDL_SCANCODE_F8:
                     case SDL_SCANCODE_BACKSPACE:

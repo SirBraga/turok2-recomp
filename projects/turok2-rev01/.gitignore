@@ -1,0 +1,13 @@
+baserom*
+*.z64
+*.n64
+*.v64
+asm/
+bin/
+assets/
+undefined_*.txt
+*.ld
+include/macro.inc
+RecompiledFuncs/
+build/
+.venv/

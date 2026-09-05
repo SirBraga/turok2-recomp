@@ -8719,6 +8719,8 @@ L_0022B524:
     ctx->r10 = MEM_W(ctx->r20, 0X8);
     // 0x0022B534: lw          $t3, 0xC($s4)
     ctx->r11 = MEM_W(ctx->r20, 0XC);
+        turok2_patch_lastpos_hold(rdram, ctx);
+
     // 0x0022B538: sw          $t1, 0x144($s4)
     MEM_W(0X144, ctx->r20) = ctx->r9;
     // 0x0022B53C: sw          $t2, 0x148($s4)

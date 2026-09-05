@@ -1,0 +1,79 @@
+name: Turok 2 - Seeds of Evil (US Rev.01 / crash-screen rebuild)
+sha1: f005a571471602ceaa8f15b45e834d0d5ba19261
+
+options:
+  basename: turok2
+  base_path: ..
+  target_path: baserom.z64
+  src_path: src
+  asm_path: asm
+  symbol_addrs_path:
+    - ../versions/symbol_addrs.rev01.txt
+  undefined_funcs_auto_path: ../versions/undefined_funcs_auto.rev01.txt
+  undefined_syms_auto_path: ../versions/undefined_syms_auto.rev01.txt
+
+  compiler: SN64
+  platform: n64
+  subalign: 1
+  find_file_boundaries: True
+  use_legacy_include_asm: False
+  generated_c_preamble: "#include \"include_asm.h\""
+  generated_s_preamble: ".set fp=64"
+
+# First-pass map measured from this ROM. Do not copy US 1.0 offsets.
+# Engine still TLB-maps at vaddr 0x00200000 (boot stub is the US 1.0 stub
+# except the jalr target, which is 0x00274FD0 instead of 0x0028D380).
+segments:
+  - name: header
+    type: header
+    start: 0x0
+
+  - name: boot
+    type: bin
+    start: 0x40
+
+  - name: main
+    type: code
+    align: 1
+    start: 0x1000
+    vram: 0x80000400
+    subsegments:
+      - [0x1000, asm]
+
+  - name: code
+    type: code
+    align: 1
+    start: 0x1100
+    vram: 0x00200500
+    subsegments:
+      - [0x1100, asm]
+
+  # Last engine jr $ra delay slot is 0x8A4C0. Strings begin 0x8A4D0.
+  - name: code_rodata
+    type: code
+    align: 1
+    start: 0x8A4C4
+    vram: 0x800898C4
+    subsegments:
+      - [0x8A4C4, rodata]
+
+  - name: ucode
+    type: bin
+    start: 0x9F35C
+    vram: 0x8009E75C
+
+  # First prologue after the ucode blob.
+  - name: libultra
+    type: code
+    align: 1
+    start: 0xA3118
+    vram: 0x800A2518
+    subsegments:
+      - [0xA3118, asm]
+      - [0xC7A84, data]
+
+  - name: rest
+    type: bin
+    start: 0xC8000
+
+  - [0x2000000]

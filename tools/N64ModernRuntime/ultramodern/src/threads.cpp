@@ -1,4 +1,5 @@
 #include <cstdio>
+#include <cstdint>
 #include <thread>
 #include <cassert>
 #include <string>
@@ -8,6 +9,8 @@
 #include "blockingconcurrentqueue.h"
 
 #include "ultramodern/threads.hpp"
+
+extern "C" void turok2_register_osthread(uint32_t addr, uint32_t stack_top);
 
 // Native APIs only used to set thread names for easier debugging
 #ifdef _WIN32
@@ -295,6 +298,7 @@ extern "C" void osCreateThread(RDRAM_ARG PTR(OSThread) t_, OSId id, PTR(thread_f
         fprintf(stderr, "[thread:stack] thread %d entry %08X stack top %08X pri %d\n",
             id, (uint32_t)entrypoint, top, (int)pri);
         fflush(stderr);
+        turok2_register_osthread(static_cast<uint32_t>(t_), top);
     }
 
     // Spawn a new thread, which will immediately pause itself and wait until it's been started.

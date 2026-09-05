@@ -27,12 +27,82 @@ RT64 interpolation off, RAX/audio bank path repaired.
 | gFrameIncrement | 0x800B6D28 | (ticks * 15) / refresh |
 | gRefreshRate | 0x8011B0A4 | NTSC 60 |
 | gDisplayListCount | 0x8011B110 | triple-buffer spare slots |
-| GameApp | 0x800F6CB0 | |
+| GameApp | 0x800F6CB0 | CEngineApp, confirmed by LibTEngine TUROK2.md |
+| GameHeap | 0x800D1CC0 | CHeap, same source |
 | aspMain ROM | 0xBF520 | IMEM 0x1080, table DMEM+0x10 |
 | live libaudio | 0x0028A4A0 | ROM 0x08AAA0; 0xC3074 is a dead duplicate |
 | RAX cluster | `func_0028B614`…`func_0028BDFC` | many `lbu`, no COP1 |
 | unpack candidate | `func_0028DBAC` | 0x350, 19 `lbu`, 2 `jal` |
 | compact unpack | `func_00292640` | 0x204, 16 `lbu`, 1 `jal` |
+
+## LibTEngine TUROK2.md — pulled 2026-09-05
+
+Source: `references/LibTEngine/TUROK2.md` and
+`lib/libtengine/lib/types/*.h` / `turok2/release_us.h`. The markdown itself is
+a stub (`TODO`) plus two anchors and a table of headers. The headers are the
+useful part. Function addresses in `functions.csv` / `Cinema.h` are Turok 3
+or unset for T2 US (`CinemaMoveHook` is `#warning "This does not yet support US!"`).
+Keep using layouts and names; do not seed `jal` targets from that CSV.
+
+What already matches this ROM:
+- `GameApp` `0x800F6CB0`, `refresh_rate` `0x8011B0A4`, `GameHeap` `0x800D1CC0`
+- `CContState` sizeof `0x224` — same stride as the four ports at `0x800F5EC0`
+- `CCamera.m_vTCorners` `+0x24C` and `m_FogStart` `+0x524` — already the
+  widescreen-cull and fog hook sites
+- `CPlayer.m_InvincibilityTime` float at `+0xA30` and
+  `m_FrameIncrementScaled` at `+0xA28` — already how i-frames were classified
+- `COverlay.m_Time` int at `+0x0C` — the HUD leftover already hooked
+
+What LibTEngine does **not** name for T2 US (left as `0x00000000`):
+`frame_increment`, `FRAME_FPS`, `bCutsceneBlackBars`. Those we found
+ourselves (`gFrameIncrement` `0x800B6D28`, `gNextTicks` `0x8011AD10`).
+
+Typed map from `GameApp` (`CEngineApp`, sizeof claimed `0x24050`):
+
+| Offset | Field | Why it matters |
+| --- | --- | --- |
+| `+0x000` | `m_FrameData[3]` | the three CFBs; `CFrameData.m_nPredictFields` is VI prediction |
+| `+0x3C0` | `m_pCurrentFrameData` | which of the three is live |
+| `+0x3C8` | `m_Scene` | `m_rpCinemas` / `m_pisCinemas` at scene `+0x24` / `+0x60` |
+| `+0x19440` | `m_OnScreen` | HUD overlays |
+| `+0x19608` | `m_FxSystem` | swooshes, `CFxTimer` floats (`m_Time`/`m_Spacing`) |
+| `+0x22C00` | `m_CameraPool` | active camera is list head |
+| `+0x23FD0` | `m_ModeTime` / `m_Mode` / `m_NextMode` | frontend/game mode machine |
+| `+0x23FE0` | `m_FadeFast` / `m_FadeStatus` / `m_FadeAlpha` | **full-screen fade** |
+| `+0x23FE8` | `m_bDoIdle` | attract/demo gate (we had `D_800B6D64` separately) |
+
+`CCamera` (sizeof `0xEC0`), the object our cull hook already receives:
+
+| Offset | Field | Why it matters |
+| --- | --- | --- |
+| `+0x018` / `+0x020` | `m_Time` / `m_StageTime` | cinema camera clocks |
+| `+0x07C`…`+0x090` | `m_WaterWobble*` | underwater warp, float-timed |
+| `+0x508` | `m_FogColor[4]` | cinema clear / fog; candidate for RGB(0,0,27) |
+| `+0x520` / `+0x52C` | `m_FlashTimer` / `m_FlashMode` | **full-screen flash** (`OFF/ATTACK/SUSTAIN/DECAY`) |
+| `+0x530`…`+0x536` | `m_Flash` / `m_FlashColor` | opacity and colour of that flash |
+| `+0x558` | `m_SkySystem` | `CSkyLayer.m_Alpha` / `m_cFrame` / `m_Opacity` — Joshua cloud blink |
+
+`CContState+0xC8` is `m_bRumbleConnected`, `+0xD0`/`+0xD4` are rumble speed/count,
+`+0xD8` is `OSPfs`, `+0x140` is `CRumblePool`. That kills the earlier reading of
+those offsets as a demo playback clock.
+
+Adon cover probe shipped 2026-09-05 (measurement only, no behaviour change):
+`TUROK2_ADON_COVER=1` logs fade/flash on change plus a cinema heartbeat.
+`=2`/`all` logs every cinema Draw. `TUROK2_PRESENT_TRACE=1` alone is enough
+to stamp the same snapshot onto every `[trace] n=` line (`draw=` `fc=`
+`fade=` `flash=` `rgb=` `cam=`), which is the join key for ffmpeg YAVG flats.
+Also stamped on `[rect]` when `TUROK2_PAIR_TRACE=1`. Zero cost when unset.
+
+**Result 2026-09-05 (`/tmp/adon-cover.log`, unique 120, ~178s):** hypothesis
+dead. Flash never left `OFF/0` on either camera (2627 `[adon]` lines, 487
+samples of cinema cam `806FF120`, rgb always `000000` not the flat `00001B`).
+`m_FlashTimer` on `806FF120` does advance (0.125 steps / authored seconds),
+so we were reading a live CCamera — the overlay was simply not armed.
+Engine fade only ramps at scene transitions (~20 Draws, `fst=1` in / `fst=2`
+out). During the long cinema (t=100–169, plus a second stretch from 169)
+`fade=1.000 fst=0` on 10577 of 10716 cinema presents: that is "fully in",
+not a black cover (the user can see the shot). Isolated single-frame flats
+cannot be this 20-frame ramp. Do not patch fade or flash for the Adon flicker.
 
 ## 60 FPS
 Host C + toml hooks, rebuilt into `Turok2Recompiled`. Default is unique 60 Hz
@@ -133,10 +203,14 @@ Watch stderr `[fps:engine]`, `[rt64:source-rate]`, and `[rt64:interp]`.
   F1 RT64 ImGui editor is D3D12/Vulkan only — Metal NewFrame SIGSEGVs.
 - F8 snaps cinema `currentTime` past the path end and pulses Start.
 - F5/F7 dump/restore 8MB RDRAM + useg bank window to `saves/quick.t2sav`.
-  Load keeps live ultramodern `OSThread` (host `context` pointer) and
-  message-queue thread heads. The first scan matched 4299 false
-  positives and crashed; the scan now requires 8-aligned structs,
-  stack in `0x800C0000–0x80128000`, and 4–24 hits.
+  Format v2 stores the host pid. Every F7 stitches live OS back on:
+  registered `osCreateThread` / `osCreateMesgQueue` objects, guest
+  stacks, and queue rings. A raw same-process restore (2026-09-05)
+  printed "carregou" then froze — host waiters are not in RDRAM. An
+  earlier 4-align walk matched 462 lookalikes and also froze. Load
+  runs on Update only. Save path also checks `exe/../saves`. F5/F7/5/7
+  work during N64 pause; only the Graphics modal eats them. Mac F7 is
+  often a media key — `7` still loads. HUD turns on after F5/F7.
 - `TUROK2_AUTO_LOAD=1` loads that save after 3s of Updates.
 
 ### Integer 15/30 family — flinch + hurt SFX 2026-09-04
@@ -508,30 +582,255 @@ Also ruled out after that reframing:
 8. *Full-screen overlay quad.* Counted rectangle draws covering the colour image
    (`fullRects` in the pair trace). Baseline is 1, values move in blocks of 1-4,
    and there is not a single isolated spike in 6107 cinema pairs.
+9. *CCamera flash / CEngineApp fade.* Live RDRAM during a ~69 s Adon cinema:
+   flash stayed `OFF/0` on main and `806FF120`; fade only ramps at cuts. See
+   LibTEngine section.
+
+Cover-layer measurement is done and negative (see LibTEngine section).
+Flash/fade are not the Adon flats. Do not patch them.
+
+### gFrameCount LSB / `m_DrawFrame` — in test 2026-09-05
+
+`lw ... 0x6D18` is exhausted (14 sites; incrementers kill-listed; wave / UV
+already hooked; `lwc1` at `0x0024D80C` is `0x800A6D18`, ignore). The word
+is also read as a **byte**: `lbu ... 0x6D1B` is `gFrameCount & 0xFF`.
+
+LibTEngine `CGameSimpleInstance` (sizeof `0x198`):
+
+| Offset | Field | Role |
+| --- | --- | --- |
+| `+0x038` | `m_mOrientation[2]` | 64-byte `Mtx`, index `0x6D1C` (`sll 6`) |
+| `+0x194` | `m_DrawFrame` | dirty stamp vs `0x6D1B` |
+| `+0x195` | `m_AdvanceFrame` | `func_002156FC` (already × increment) |
+
+`lbu 0x6D1B` catalog:
+
+| VRAM | Func | Role | Action |
+| --- | --- | --- | --- |
+| `0x002149A8` / `0x00214B20` | `func_00214844` | wave vs `+0x8A`; stamp at end | leave (even-gate already hooked) |
+| `0x00214EA8` | `func_00214E88` | vs `+0x8A` | leave |
+| `0x00215240` | init | store `LSB-1` to `+0x194/+0x195` | leave (first draw must run) |
+| `0x002152DC` | `func_002152AC` | `m_DrawFrame` vs LSB; skip writes `m_mOrientation[6D1C]` then still draws that slot | **hooked** |
+| `0x002153A4` | `func_002152AC` | same stamp, skip `func_0020B4F0` | leave (anim has its own word gate) |
+| `0x002154BC` | `func_002152AC` | stamp `m_DrawFrame = LSB` | leave |
+| `0x00215704` / `0x002157E0` | `func_002156FC` | `m_AdvanceFrame`; already × increment | do not force dirty |
+| `0x00227410` | alloc | store `LSB-1` | leave |
+
+Do **not** leftover-hold `0x6D1B` at the compare: that skips more rebuilds
+while `0x6D1C` still flips and draws the unwritten slot (worse flats).
+`turok2_patch_frame_lsb_dirty` on `func_002152AC` @ `0x002152E0` forces a
+mismatch in cinema so the current orientation slot is always rebuilt.
+**FAILED eye-test 2026-09-05.** At unique 120 `gFrameCount` still `+= 1`
+every Draw, so `m_DrawFrame == LSB` almost never fires (only same-Draw
+double-call). The hook is a no-op on the cadence that flickers. Do not
+leftover-hold `0x6D1B`. Do not leftover stored `gFrameCount`. Leave the
+hook in place; `[cin:lsb] skip=` / `rebuild=` now prints from the cinema
+eye hook so the next run can confirm skip≈0.
+
+**Cinema cut-hold FAILED eye-test 2026-09-05.** Live `/tmp/adon-cut-hold.log`:
+`skip=0` every heartbeat (dirty hook is a no-op at unique 120). 38
+`[cin:hold]` fires (19 cuts × main `801198F0` + path `806FF120`, same
+pose). User still saw the Primagen flats, including on locked-off shots.
+Do not pull the cinema eye. Do not leftover `gFrameCount`. Do not drop Hz.
+
+**Thread interlock EXONERATED.** `ENABLE_HIGH_RESOLUTION_RENDERER` is 1.
+`threadRenderFrame` holds `workloadMutex` for the whole record+execute+wait.
+Present locks the same mutex when interpolation is off (unique 120). They
+already serialize.
+
+**Cinema region hold FAILED eye-test 2026-09-05.** `/tmp/adon-region-hold.log`:
+~16 `SWITCH` pairs (old `+0x58` kept while the eye is already in the new
+room — that *is* a fog frame, same count as the measured flats) plus a
+long `NULL` stream after the 7586 cut (`keep=801DAF10` for hundreds of
+Draws). That stream is the 2D Primagen block; forcing a 3D section there
+is wrong. Isolated 3D `NULL`s were only two pairs. Hook is now
+measure-only. Do not hold `m_pCurrentRegion` on SWITCH.
+
+**Skip-main FAILED eye-test 2026-09-05.** `/tmp/adon-skip-main.log`:
+`[cin:skip] main=801198F0 path=806FF120` from the first cinema Draw
+through the Primagen chamber (`fog=000020`). User still saw the flats.
+Dual camera Draw is not the cause. Hook is opt-in (`TUROK2_SKIP_MAIN=1`).
+Cut-hold is also opt-in now (`TUROK2_CUT_HOLD=1`) — it already failed
+including locked-off shots.
+
+**Do not smooth / lerp the cinema camera for 2× Hz.** User suggested it
+2026-09-05 after skip-main. Rejected: path `func_00410BB4` already lerps
+every unique-120 Update (`currentTime += increment × 1/15`); cut-hold
+already failed on `d=0` locked shots; same flat *count* at 60 and 120
+is event-driven, not undersampled motion. Extra pose lerp would walk
+the void between rooms (more fog frames). RT64 interp hid flats by
+blending the *image*, not the camera — do not turn `targetRate` back on.
+
+**Cinema fill log 2026-09-05 (`/tmp/adon-cin-fill.log`).** Path
+`806FF120`, first Adon pass then a second. Chamber (`fog=000020`)
+from n=202 to the 7586 dolly at n=5251:
+
+| Signal | Chamber result |
+| --- | --- |
+| `sky` / `a` | **0 / 0.00 the whole time** — not a one-frame miss |
+| `vis` | **FFFFFFFF** (one `01000000` only on the outdoor `CBDBDC` cut) |
+| `preg` | always a live `801DBxxx` — no NULL in 3D |
+| `fog` / `fill5` / `fill3` | locked `000020` |
+
+So the isolated flats are not sky-off, vis-empty, or region-NULL.
+The letterbox image is the constant fill showing through when 3D
+fails to cover. Do not hold sky, vis, or `m_pCurrentRegion`.
+
+At the 7586 Primagen dolly, fog is an **authored ramp**
+`000020 → 00001B → 000000` over ~100 Draws (`preg=801DAF10`).
+`00001B` is exactly the capture eyedropper RGB(0,0,27). `fill3`
+(`& 0xE0`) goes **black** the moment B drops below `0x20`.
+`func_0027C4E4` @ `0x0027C92C` writes `m_FogColor` from a
+`0x6D20`-timed blend (also `m_cRegionSetBlend` @ `+0x504` via
+`0x0027CD84`). That is why leftover `0x6D20` modulates density:
+it is the fog-blend clock, not a skip flag. **Do not freeze this
+fade** — it is the shot going to black before the 2D block
+(`preg=0`, `sky=1`).
 
 Where to resume, in order of promise:
-0. **`gFrameCount` (0x800B6D18) as the driver.** 0x6D20 only modulates, and
-   gFrameCount is the other per-Draw counter, deliberately left untouched
-   because leftover-scaling it at the source black-screened the boot (it feeds
-   the 0x6D1C framebuffer selector). The move is not to scale it globally but to
-   find the specific read site behind this effect and scale only there. The
-   readers were already catalogued by grepping `RecompiledFuncs/` for
-   `lw ... 0x6D18`.
-1. **Thread interlock.** The present locks `workloadMutex` (rt64_present_queue
-   ~386, released ~635 after `presentGraphicsWorker->wait()`), while the
-   workload render path guards itself with `workerMutex` and does
-   `workloadGraphicsWorker->execute()` then `wait()` (rt64_workload_queue ~884).
-   Two different mutexes. The workload does wait for its own GPU work, so the
-   naive race is not it, but whether these two interlock at all is unverified
-   and is the last unexamined mechanism.
-2. **RGB(0, 0, 27).** A specific arbitrary value. Finding where the game sets
-   that clear colour ties the frame to game code with no RT64 inference at all.
-3. The `806FF120` cinema camera and the 65-call 2D block, which is the exact
-   moment the user identified.
+0. **3D coverage miss on a constant `000020` fill.** Chamber sky/vis/
+   preg do not drop. Next evidence: which world/section Draw is
+   skipped for one frame (frame-counted, leftover-modulated).
+   `func_0027C4E4` is the fog blender — do not patch it as a skip.
+1. The 65-call 2D block after the 7586 fade. Authored; not the
+   isolated 3D flats.
 
-Shipped from this investigation: nothing behavioural. The two candidate holds
-were reverted once unproven; only `TUROK2_PRESENT_TRACE` and the bookkeeping it
-reads were kept.
+Shipped from this investigation: nothing behavioural except the cover-layer
+probe. The two candidate holds were reverted once unproven;
+`TUROK2_PRESENT_TRACE` now also prints fade/flash from the same Draw.
+
+## Joshua look-up black / portal void — OPEN, reported 2026-09-05
+
+User in Joshua (gameplay, not Adon cinema): nodding the camera flickers;
+aiming at a specific spot turns the view through a doorway into a hard
+black void (weapon + HUD + local walls stay). Two photos of the same
+kind of gold-panel corridor: one shows the next room with haze, the
+other shows a portal-aligned black hole. This is not the Adon
+RGB(0,0,27) letterbox flat.
+
+Likely class: view-dependent region vis, not fog wrap. Live
+`/tmp/josh-view.log` (~1 h): `fogMin` never left `995` (0 WRAP).
+`region=-1` only on map loads. Same hole when climbing stairs in
+Port of Adia — looking *up* into the next region. Player look is
+`CCameraViewParams.m_vRotOffset` (`+0x2C`), not `m_vRotation`.
+Vis bits at ViewParams `+0x40` (`cam+0x64`); current triangle
+`m_pCurrentRegion` at `+0x58`.
+
+`TUROK2_WIDE_CULL_OFF=1` A/B **failed** (recording 2026-09-05 17:13,
+Port of Adia stairs, 7 s). Isolated frames YAVG 17.4 with the 3D
+viewport fully black and HUD still up; other frames are a hard-edged
+black slab over half–80% of the window. Adia `m_FogColor` is
+`000000`, so a missing sky/region **or a frame with the eye inside
+geometry** reads as a black flash. `vis=` stayed `FFFFFFFF`; F3 pitch
+stayed 0 (look is not ViewParams `+0x2C`). Restore default wide cull.
+
+User refinement 2026-09-05 17:43: not stairs-only. When Joshua is
+tilted and the look whips up/down, the flash lasts milliseconds and
+feels like something sitting in front of the FOV. That is the
+constructed eye, not a separate camera actor. T2 builds the view
+from the player: `m_vEyeOffset`, `m_qGround` (body tilt on slopes),
+`m_vHeadRotOffset` (this ROM at player+0xAC8). Direct mouse look
+slams that head rot in one Update and bypasses the N64 stick curve,
+so the near plane punches through the stair riser / ceiling for a
+frame. Joshua fog `6E6E78` reads as a light flicker; Adia `000000`
+reads as black.
+
+Probe shipping 2026-09-05 (eye-test, do not leave if it fails):
+1. Cap mouse look at 0.10 rad/Update in `turok2_patch_direct_mouse_look`.
+   Opt-out `TUROK2_NO_LOOK_CAP=1`. Override `TUROK2_LOOK_CAP=0.06`…`0.50`.
+2. Pull the constructed eye 10 units opposite look before
+   `func_002101A0` copies `m_mfViewOrient` translation into `m_vPos`
+   (`turok2_patch_pull_camera_eye` @ `0x0027D610`). Also shifts
+   ViewParams `m_vPos` (`cam+0x038`) so region vis tracks the same
+   origin. Gameplay main camera only. Opt-out `TUROK2_NO_EYE_PULL=1`
+   or `TUROK2_EYE_PULL=0`. Do not turn wide cull off again.
+   Do not leftover stored `gFrameCount`. If the view just feels
+   shifted sideways, the look-axis sign is wrong — revert the pull
+   and keep only the cap.
+
+Adon cinema is a different class until proven otherwise: path camera
+`806FF120`, flats RGB(0,0,27) with letterbox, not Adia black / Joshua
+gray. The gameplay pull is skipped while `g_cinema`. `m_DrawFrame`
+dirty hook **failed**. Cinema cut-hold **failed**. Region hold **failed**
+(SWITCH was the wrong pairing). Skip-main **failed** (`[cin:skip]`
+fired; flats stayed). Do not lerp the cinema camera for 2× Hz.
+
+## Weapon tracers / barrel explosions vanish at unique 120 — leftover lastPos
+
+User 2026-09-05: inside the game a lot feels accelerated; weapon shots
+sometimes vanish from being so fast, and barrel explosions too. Same
+leftover class as `0x6D20`, not another cinema pose/region/sky hold.
+
+`func_00239F00` already does `pos += vel * increment * k` (gravity path
+flag `0x4000`). Particle Advance `m_cFrame += increment` and
+`CDynamicSimple` `m_LifeTime -= increment` are also real-time. The
+4× look is the **streak**, not the Euler:
+
+- `func_0022AFB4` @ `0x0022B538` copies `m_vLastPos = m_vPos` every
+  unique Update (`$s4` = particle). Live body is `func_0022AFB4`
+  (`dump.toml` size `0xAD4`), called from `func_00230CB4` @
+  `0x00230EA4`. The same stores inside the merged `func_00228C38`
+  blob sit after `jr $ra` and never run.
+- Draw `func_00232934` @ `0x0023299C` does `pos − lastPos`
+  (`func_0020EF2C`) and feeds that vector to the tracer/ribbon.
+  Authored 30 Hz: one step (`vel * 0.5 * k`). Unique 120: the same
+  real-time travel, but the ribbon is `vel * 0.125 * k` (4× shorter),
+  so shots and explosion bits wink out.
+
+`turok2_patch_lastpos_hold` delays that copy by
+`(round(1 / visual_step_scale) − 1)` samples (3 at unique-120
+gameplay, 1 at unique 60, 0 under `TUROK2_AUTHORED_CADENCE`).
+Per-particle ring, reset when `m_cFrame <= increment * 1.5` (pool
+recycle). Do **not** skip-all-copies leftover: that pulses 1↔4.
+`turok2_patch_projectile_clear_flag` is a legacy ABI stub, not this.
+Opt-out `TUROK2_NO_LASTPOS_HOLD=1`.
+
+Do not leftover stored `gFrameCount` / `0x6D1B`. Do not drop Hz.
+Do not hook `entry_00413E14`. If travel itself is still 4× after
+this, hunt fire-interval `m_ModeTime` or the skip-`func_00239F00`
+flag path — not another lastPos site.
+
+## Barrel explosion duration 4× short at unique 120 — oneshot + CFxTimer
+
+User 2026-09-05 after lastPos: the barrel blast and its animation
+still last much less. lastPos only lengthens the ribbon; it does
+not change lifetime.
+
+ROM proof: `D_800A9E18` (copied to `D_800B6D30` every Update) is
+**1.0**, `D_800A6200` is **1/15**. So `m_cFrame += increment` and
+`m_cFramePos += increment * framerate * 1 * (1/15)` are already
+real-time. Do **not** leftover-hold those floats — that would make
+flipbook particles 4× too long.
+
+The 4× short blast is the one-Update special case:
+
+- `func_00230CB4` @ `0x00230E08`: `nFrames == 1` jumps to death
+  (`func_002325F0`) and never adds increment. Authored: one 30 Hz
+  flash (~33 ms). Unique 120: one 8 ms flash. Explosion sprites
+  and one-frame fireballs wink out.
+- `CFxTimer` (`func_002367A0`): `m_Time -= increment` is correct,
+  but `m_Spacing` below one authored step (0.5 gameplay) expires
+  every unique Update, then `m_Count -= 1`. An N-burst lasts
+  N/120 s instead of N/30 s.
+
+`turok2_patch_oneshot_particle_hold` now sits before `c.lt.s` at
+`0x00230DF8` (not after `bc1f`). The first compare `cFrame >= 1`
+was killing the sprite at ~66 ms and skipping the old hook, so a
+33 ms Advance-count hold still read as a wink. Both death
+branches are held on wall-clock 30/s for **8 authored frames**
+(~267 ms): `$f1` forced to 0 so `c.lt.s` stays live, `$v0`
+rewritten to 2 so `beq $fp` falls through.
+`turok2_patch_particle_nframes_cull` at `0x00231128` keeps
+authored `nFrames` when a nearby particle would force `1` — a
+barrel cluster was collapsing every flipbook to a oneshot.
+`turok2_patch_fx_timer_fire_hold` still caps fire at 30/s only
+when spacing `< 0.75 * authored_step`. Shared opt-out
+`TUROK2_NO_EXPLOSION_HOLD=1`.
+
+Object death mesh (`func_00218DCC` @ `0x00218F60`) is
+`frame += increment * speed * (1/15)` (`D_800A5A20`). Do not
+leftover-hold it. Do not leftover `m_cFrame += increment`. Do
+not leftover-hold `0x6D1B`. Do not ship `TUROK2_CLOCK_GOVERNOR=1`.
 
 ## Attract-mode demos cut short at high FPS — OPEN, reported 2026-09-05
 
@@ -698,6 +997,14 @@ misplaced entries broke boot. Remaining ones (texture loader, audio thread
 - When every stage of a pipeline measures healthy but the output is wrong, stop
   looking for a broken stage. The output is probably correct for what was asked,
   and the question is what asked for it.
+- Particle lifetime that already does `m_cFrame += increment` is real-time
+  when the timescale word (`D_800A9E18` / `D_800B6D30`) is 1.0. Read that
+  float from the ROM before leftover-holding it — holding a correct clock
+  makes flipbooks 4× too long. A hook after `bc1f` cannot lengthen
+  `nFrames==1`: `cFrame >= 1` kills first (~66 ms). Hold before
+  `c.lt.s`. Nearby-particle `nFrames=1` stores collapse a cluster
+  flipbook to that oneshot path — skip the store, do not leftover
+  `m_cFrame`.
 - A knob that changes a symptom's *rate* without removing it has found the
   clock, not the cause. Turning the 0x6D20 hold off made the Adon flicker 1.6x
   denser, which proved a frame counter drives it after six presentation-side
@@ -730,6 +1037,10 @@ misplaced entries broke boot. Remaining ones (texture loader, audio thread
   were five rounds of per-site UV/swoosh/wave hooks that each fixed a sliver
   and never the symptom; all three read `0x800B6D20`, and one leftover on the
   incrementer fixed them together.
+- A projectile that "vanishes from being so fast" can already have
+  increment-correct Euler. `m_vLastPos = m_vPos` every unique Update
+  makes the Draw ribbon 4× shorter at 120; delay the snapshot, do not
+  scale velocity again. A skip-copy leftover pulses the streak.
 - Raising the Draw rate breaks every clock counted in frames, not just the
   visible ones. Decide per counter whether it is a *clock* (hold it) or a
   *timestamp / buffer index* (never hold it). Rewinding `gFrameCount` froze
@@ -745,9 +1056,10 @@ misplaced entries broke boot. Remaining ones (texture loader, audio thread
 ## Tools
 ### Present diagnostics (RT64, off by default)
 
-`TUROK2_PRESENT_TRACE=1` numbers every present and prints what was shown:
+`TUROK2_PRESENT_TRACE=1` numbers every present and prints what was shown,
+including the Draw-side fade/flash snapshot:
 
-    [trace] n=1234 vi=006A8840 fb=006A8C00 fillOnly=0 noScene=0 inSet=0 presentable=0 colors=1 interp=0
+    [trace] n=1234 ... draw=1200 fc=800 cinema=1 fade=0.000 fst=0 cam=801198F0 flash=0/0 rgb=000000 live=1
 
 `fillOnly` and `noScene` describe the last workload to touch that colour
 address: every call was a `G_CYC_FILL` rectangle, and no Perspective/Triangle
@@ -772,6 +1084,7 @@ hook on `func_00286B58`.
 | `TUROK2_TIMER_DUMP=1` | With the above, hex-dumps the block around heap hits so pointers identify the object. |
 | `TUROK2_BOOT_TIMELINE=1` | Logs the first change of every global in `0x800B0000`-`0x80140000` during the first 2500 Draws, with both the Draw number and the wall clock. |
 | `TUROK2_CLOCK_GOVERNOR=1` | Holds every detected per-Draw clock to the authored rate. Slows the whole game — diagnostic only, never ship. |
+| `TUROK2_ADON_COVER=1` | Logs `CEngineApp` fade and `CCamera` flash on change, plus a cinema heartbeat. `=2` logs every cinema Draw. Also armed by `TUROK2_PRESENT_TRACE` / `TUROK2_PAIR_TRACE` so those lines carry the same snapshot. |
 
 **The A/B that actually answers "is this 2x?":** run a scan twice,
 once with `TUROK2_AUTHORED_CADENCE=1` (30 Draw/s) and once at unique
