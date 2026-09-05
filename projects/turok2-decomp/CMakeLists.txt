@@ -13,9 +13,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if(WIN32)
-    # windows.h defines min/max (and the 16-bit leftovers near/far). Those
-    # macros turn std::min/std::max and locals named far into syntax errors.
-    add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN)
+    # windows.h defines min/max macros that turn std::min/std::max into a
+    # parse error. Do not also define WIN32_LEAN_AND_MEAN here: DXC's
+    # dxcapi.h needs IUnknown/IStream/BSTR from the full COM headers.
+    add_compile_definitions(NOMINMAX)
 endif()
 
 set(N64RECOMP_ROOT
