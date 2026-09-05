@@ -33,13 +33,19 @@ target_include_directories(Turok2RecompiledFuncs PUBLIC
 # Those diagnostics are noise here, and the patch header must be force-included
 # into every one of the ~1000 translation units.
 if(MSVC)
+    # /FI plus a quoted absolute path becomes /FI\"path\" under Ninja, and
+    # cl.exe then looks for a file whose name includes the quotes. Point the
+    # include path at the patches folder and force-include by basename.
+    target_include_directories(Turok2RecompiledFuncs PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/patches")
     target_compile_options(Turok2RecompiledFuncs PRIVATE
         /bigobj                 # generated TUs blow past the default section limit
+        /utf-8
         /wd4013                 # undefined function, assumed extern returning int
         /wd4101                 # unreferenced local
         /wd4723                 # potential divide by zero
         /wd4102                 # unreferenced label
-        /FI"${CMAKE_CURRENT_SOURCE_DIR}/src/patches/turok2_patches.h")
+        /FIturok2_patches.h)
 else()
     target_compile_options(Turok2RecompiledFuncs PRIVATE
         -fno-strict-aliasing
@@ -86,6 +92,9 @@ if(TUROK2_BUILD_APP)
             "${TUROK2_RT64_DIR}/src/contrib/mupen64plus-win32-deps/SDL2-2.26.3")
         set(SDL2_INCLUDE_DIRS "${TUROK2_SDL2_DIR}/include")
         set(SDL2_LIBRARIES "SDL2" "SDL2main")
+        # RecompFrontend still looks for the FetchContent-style sdl2_SOURCE_DIR
+        # on Windows. Point it at the vendored tree so SDL.h resolves.
+        set(sdl2_SOURCE_DIR "${TUROK2_SDL2_DIR}")
         link_directories("${TUROK2_SDL2_DIR}/lib/x64")
     else()
         find_package(SDL2 REQUIRED)
@@ -146,7 +155,7 @@ if(TUROK2_BUILD_APP)
 
     if(MSVC)
         # -fms-extensions has no counterpart: MSVC already is the extension set.
-        target_compile_options(Turok2Recompiled PRIVATE /bigobj)
+        target_compile_options(Turok2Recompiled PRIVATE /bigobj /utf-8)
     else()
         target_compile_options(Turok2Recompiled PRIVATE
             -fno-strict-aliasing
@@ -164,7 +173,18 @@ if(TUROK2_BUILD_APP)
     # The imported SDL2::SDL2 target only exists via find_package. The vendored
     # Windows copy is plain link libraries plus a link_directories entry.
     if(WIN32)
-        target_link_libraries(Turok2Recompiled PRIVATE ${SDL2_LIBRARIES})
+        target_link_libraries(Turok2Recompiled PRIVATE
+            ${SDL2_LIBRARIES}
+            shell32
+            ole32
+            oleaut32
+            uuid
+            user32
+            advapi32
+            winmm
+            imm32
+            version
+            setupapi)
 
         # Off by default so the console stays attached and stderr is readable,
         # which is what makes a failing run on Windows diagnosable at all. Turn

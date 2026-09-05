@@ -59,15 +59,31 @@ jobs:
           New-Item -ItemType Directory -Force -Path $dist | Out-Null
           Copy-Item "build-win/Turok2Recompiled.exe" $dist
           Copy-Item "build-win/*.dll" $dist -ErrorAction SilentlyContinue
-          Copy-Item "build-win/assets" $dist -Recurse
-          # The ROM is not shipped. The launcher asks for it on first run and
-          # stores it in the per-user application folder from then on.
+          if (Test-Path "build-win/assets") {
+            Copy-Item "build-win/assets" $dist -Recurse
+          }
+          if (Test-Path "projects/turok2-decomp/mods") {
+            New-Item -ItemType Directory -Force -Path "$dist/mods" | Out-Null
+            Copy-Item "projects/turok2-decomp/mods/*" "$dist/mods" -Recurse -ErrorAction SilentlyContinue
+          }
+          # Keep saves, settings and the stored ROM next to the exe for a
+          # drop-in test folder. Delete portable.txt to use LocalAppData.
+          Set-Content -Path "$dist/portable.txt" -Value ""
+          # The ROM is not shipped. The launcher asks for it on first run.
           @"
           Turok 2: Recompiled
 
-          Run Turok2Recompiled.exe and pick your Turok 2 (USA) ROM when the
-          launcher asks for it. It is remembered after the first time.
-          "@ | Set-Content "$dist/LEIAME.txt"
+          1. Instale o Visual C++ Redistributable 2015-2022 (x64) se o Windows
+             pedir DLLs da runtime.
+          2. Rode Turok2Recompiled.exe.
+          3. No launcher, use Carregar ROM e escolha o dump USA 1.0
+             (SHA1 fb0400f21e3f043939ab56500c7b12a3231006f1).
+          4. Depois disso o botao vira Jogar. Controles, Opcoes e Mods
+             ficam no mesmo menu (Esc / F10 no jogo).
+
+          portable.txt faz saves e configs morarem nesta pasta. Apague o
+          arquivo se quiser o padrao em %LOCALAPPDATA%\turok2-recompiled.
+          "@ | Set-Content -Encoding utf8 "$dist/LEIAME.txt"
 
       - name: Upload build
         uses: actions/upload-artifact@v4
