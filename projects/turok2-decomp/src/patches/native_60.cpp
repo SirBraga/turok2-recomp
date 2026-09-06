@@ -23,9 +23,10 @@
 // one real second. Intermediate poses are the engine's own float lerp, not
 // RT64 frame-matching. The N64 VI stays at 60 so audio mixing is not doubled.
 // TUROK2_AUTHORED_CADENCE=1 restores the original 30/15 Hz scheduler.
-// Unique 120 is the default: increment 0.125, leftover += 0.125, host VI 120,
-// AI still every other tick. TUROK2_UNIQUE_60=1 drops back to 60 for A/B
-// measurement only.
+// Unique 120 is the default: host VI 120, increment = 15 * wall-clock dt
+// (0.125 at a true 120 Updates/s). A fixed 0.125 made the game slow-motion
+// whenever Updates dropped below 120. AI still every other tick.
+// TUROK2_UNIQUE_60=1 drops back to 60 for A/B measurement only.
 
 constexpr int32_t kNextTicks = 0x8011AD10;
 constexpr int32_t kFrameIncrement = 0x800B6D28;
@@ -81,12 +82,15 @@ static const char* engine_mode_name() {
     }
 }
 
+static void reset_increment_clock();
+
 extern "C" void turok2_set_engine_hz(int mode) {
     if (mode < 0 || mode > 2) {
         mode = 2;
     }
     const int prev = g_menu_engine_hz.exchange(mode, std::memory_order_relaxed);
     if (prev != mode) {
+        reset_increment_clock();
         std::fprintf(stderr, "[fps:engine] menu hz=%s (env override=%d)\n",
                      engine_mode_name(), env_engine_hz_override());
     }
@@ -197,6 +201,58 @@ extern "C" void turok2_patch_native_60(uint8_t* rdram, recomp_context* ctx) {
     turok2_debug_tick(rdram, g_cinema ? 1 : 0);
 }
 
+// Authored time is 15 increment-units per real second (gameplay 0.5 at
+// 30 Hz, cinema 1.0 at 15 Hz, unique 60 = 0.25, unique 120 = 0.125).
+// A fixed 0.125 assumes every VI becomes an Update. If leftover/camera
+// work drops the engine to ~60 Updates while increment stays 0.125, the
+// whole game runs at half speed — the Graphics Hz regression. Step from
+// wall-clock dt so 120 unique frames stay real-time when they land, and
+// missed VIs take a larger step instead of going slow-motion.
+static constexpr float kAuthoredUnitsPerSecond = 15.0f;
+static constexpr float kMaxIncrementDt = 0.05f;
+static constexpr float kMinIncrementDt = 1.0f / 240.0f;
+static constexpr float kSameUpdateReuseDt = 0.0015f;
+
+static std::chrono::steady_clock::time_point g_increment_last{};
+static float g_current_increment = 0.125f;
+static bool g_increment_armed = false;
+
+static float nominal_increment() {
+    return unique_120_enabled() ? 0.125f : 0.25f;
+}
+
+static void reset_increment_clock() {
+    g_increment_armed = false;
+    g_current_increment = nominal_increment();
+}
+
+static float wall_clock_increment() {
+    using Clock = std::chrono::steady_clock;
+    const auto now = Clock::now();
+    if (g_increment_armed) {
+        const float since =
+            std::chrono::duration<float>(now - g_increment_last).count();
+        // lock_increment and relock_increment both write the guest word
+        // in the same Update. Reuse the step so dt is not applied twice.
+        if (since < kSameUpdateReuseDt) {
+            return g_current_increment;
+        }
+        float dt = since;
+        if (dt > kMaxIncrementDt) {
+            dt = kMaxIncrementDt;
+        } else if (dt < kMinIncrementDt) {
+            dt = kMinIncrementDt;
+        }
+        g_increment_last = now;
+        g_current_increment = kAuthoredUnitsPerSecond * dt;
+        return g_current_increment;
+    }
+    g_increment_armed = true;
+    g_increment_last = now;
+    g_current_increment = nominal_increment();
+    return g_current_increment;
+}
+
 static void apply_native_increment(uint8_t* rdram) {
     if (preserve_authored_cadence()) {
         return;
@@ -206,19 +262,17 @@ static void apply_native_increment(uint8_t* rdram) {
         return;
     }
     MEM_W(kNextTicks, 0) = 1;
-    // Keep guest gRefreshRate at NTSC 60. Unique 120 only halves the
-    // 15 Hz-unit step so 120 Updates still advance one authored second.
-    const float refresh = load_f32(rdram, kRefreshRate);
-    const float increment = unique_120_enabled()
-        ? 0.125f
-        : ((refresh > 1.0f) ? (15.0f / refresh) : 0.25f);
+    // Keep guest gRefreshRate at NTSC 60. The unique step is the 15 Hz
+    // unit rate times real dt, not a constant that only works at exactly
+    // 60 or 120 completed Updates per second.
+    const float increment = wall_clock_increment();
     store_f32(rdram, kFrameIncrement, increment);
     static bool announced = false;
     if (!announced && unique_120_enabled()) {
         announced = true;
         std::fprintf(stderr,
-            "[fps:engine] unique120 increment=0.125 leftover=0.125 "
-            "vi=120 ai=60 interp=off\n");
+            "[fps:engine] unique120 increment=wall-clock*15 "
+            "nominal=0.125 vi=120 ai=60 interp=off\n");
     }
 }
 
@@ -3110,7 +3164,9 @@ extern "C" void turok2_patch_lastpos_hold(uint8_t* rdram, recomp_context* ctx) {
         return;
     }
 
-    const float scale = visual_step_scale(rdram);
+    // Hold distance is a function of the target unique rate, not the
+    // per-Update wall-clock increment, or the delay jitters with dt.
+    const float scale = nominal_increment() / 0.5f;
     if (scale <= 0.0f || scale >= 0.999f) {
         return;
     }
