@@ -19,7 +19,7 @@ if(WIN32)
     add_compile_definitions(NOMINMAX)
 endif()
 
-set(N64RECOMP_ROOT)
+set(N64RECOMP_ROOT
     "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/N64ModernRuntime/N64Recomp"
     CACHE PATH "Path to the N64Recomp headers bundled with N64ModernRuntime")
 set(N64MODERNRUNTIME_ROOT
