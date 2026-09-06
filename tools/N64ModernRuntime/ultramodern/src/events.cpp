@@ -240,8 +240,17 @@ void vi_thread_func() {
     int remaining_retraces = 1;
 
     while (!exited) {
-        // Determine the next VI time (more accurate than adding 16ms each VI interrupt)
-        auto next = ultramodern::get_start() + (total_vis * 1000000us) / (host_vi_hz() * ultramodern::get_speed_multiplier());
+        // Determine the next VI time (more accurate than adding 16ms each VI interrupt).
+        // total_vis is in host-VI units. If Graphics → Hz changes 60↔120,
+        // rescale so the next wake stays on the current wall time instead
+        // of sleeping or bursting by 2×.
+        const uint32_t vi_hz = host_vi_hz();
+        static uint32_t last_vi_hz = 0;
+        if (last_vi_hz != 0 && last_vi_hz != vi_hz && total_vis > 0) {
+            total_vis = (total_vis * vi_hz + last_vi_hz / 2) / last_vi_hz;
+        }
+        last_vi_hz = vi_hz;
+        auto next = ultramodern::get_start() + (total_vis * 1000000us) / (vi_hz * ultramodern::get_speed_multiplier());
         //if (next > std::chrono::high_resolution_clock::now()) {
         //    printf("Sleeping for %" PRIu64 " us to get from %" PRIu64 " us to %" PRIu64 " us \n",
         //        (next - std::chrono::high_resolution_clock::now()) / 1us,
@@ -258,7 +267,7 @@ void vi_thread_func() {
         ultramodern::sleep_until(next);
         auto time_now = ultramodern::time_since_start();
         // Calculate how many VIs have passed
-        uint64_t new_total_vis = (time_now * (host_vi_hz() * ultramodern::get_speed_multiplier()) / 1000ms) + 1;
+        uint64_t new_total_vis = (time_now * (vi_hz * ultramodern::get_speed_multiplier()) / 1000ms) + 1;
         if (new_total_vis > total_vis + 1) {
             //printf("Skipped % " PRId64 " frames in VI interupt thread!\n", new_total_vis - total_vis - 1);
         }

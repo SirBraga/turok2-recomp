@@ -23,6 +23,19 @@
 #include <algorithm>
 using u32 = uint32_t;
 
+#if defined(_MSC_VER) && !defined(__clang__)
+#include <intrin.h>
+static inline u32 rsp_clz(u32 value) {
+    unsigned long index = 0;
+    _BitScanReverse(&index, value);
+    return 31u - static_cast<u32>(index);
+}
+#else
+static inline u32 rsp_clz(u32 value) {
+    return static_cast<u32>(__builtin_clz(value));
+}
+#endif
+
 #define ACCH vpu.acch
 #define ACCM vpu.accm
 #define ACCL vpu.accl
@@ -1353,7 +1366,7 @@ auto RSP::VRCP(r128& vd, u8 de, cr128& vt) -> void {
     } else if (input == -32768) {
         result = 0xffff'0000;
     } else {
-        u32 shift = __builtin_clz(data);
+        u32 shift = rsp_clz(data);
         u32 index = (u64(data) << shift & 0x7fc0'0000) >> 22;
         result = rspReciprocals[index];
         result = (0x10000 | result) << 14;
@@ -1405,7 +1418,7 @@ auto RSP::VRSQ(r128& vd, u8 de, cr128& vt) -> void {
     } else if (input == -32768) {
         result = 0xffff'0000;
     } else {
-        u32 shift = __builtin_clz(data);
+        u32 shift = rsp_clz(data);
         u32 index = (u64(data) << shift & 0x7fc0'0000) >> 22;
         result = rspInverseSquareRoots[index & 0x1fe | shift & 1];
         result = (0x10000 | result) << 14;
