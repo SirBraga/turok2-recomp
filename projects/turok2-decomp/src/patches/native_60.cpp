@@ -146,8 +146,10 @@ static float camera_fov_scale() {
 }
 
 // RDP gSPFogPosition min. Packed int CCamera.m_FogStart (+0x524) keeps the
-// 0-1000 fog min in its low 16 bits. This is the shipped floor that keeps the
-// fog wall off the authored N64 range; it is not a user setting.
+// 0-1000 fog min in its low 16 bits. A 2× push used to hide the fog wall
+// after far-clip was scaled 2×. Far-clip scale is gone; pushing fog now
+// starts it too far (looks wrong) and reveals extra distant geometry.
+// Only the 996 wrap-cap stays. TUROK2_FOG_PUSH=1 restores the old push.
 static constexpr float kFogDistanceScale = 2.0f;
 
 static float load_f32(uint8_t* rdram, int32_t addr) {
@@ -518,13 +520,10 @@ extern "C" void turok2_patch_scale_overlay_wait(uint8_t* rdram, recomp_context* 
 
 extern "C" void turok2_patch_wave_every_update(uint8_t* rdram, recomp_context* ctx) {
     // func_00214844 / entry_00214F68 skip vertex-color waves on odd
-    // gFrameCount (0x800B6D18). Unique 60/120 would still run 2×/4× and
-    // skip the in-between samples. Force the even-frame gate open.
+    // gFrameCount. Forcing the gate open at unique 120 ran waves at
+    // 120/s (authored is 15/s). Leave the even/odd skip alone.
     (void)rdram;
-    if (preserve_authored_cadence()) {
-        return;
-    }
-    ctx->r2 = 0;
+    (void)ctx;
 }
 
 extern "C" void turok2_patch_scale_wave_index(uint8_t* rdram, recomp_context* ctx) {
@@ -1459,12 +1458,15 @@ static float camera_cull_scale() {
         // ultrawide window. Render a little more scene than is strictly needed
         // so CPU-side Turok 2 region/object culling never cuts into the image.
         const char* text = std::getenv("TUROK2_WIDE_CULL_SCALE");
+        // 16:9 Expand vs authored 4:3 is 1.333. 2.0 was 4× far-plane area
+        // and is why a 1660 Ti dropped to ~80 at unique 120. Ultrawide
+        // can raise this: TUROK2_WIDE_CULL_SCALE=2.
         if (text == nullptr || *text == '\0') {
-            return 2.0f;
+            return 1.4f;
         }
         const float requested = std::strtof(text, nullptr);
         if (!std::isfinite(requested)) {
-            return 2.0f;
+            return 1.4f;
         }
         return requested < 1.0f ? 1.0f : (requested > 3.2f ? 3.2f : requested);
     }();
@@ -2620,7 +2622,8 @@ extern "C" void turok2_patch_fog_position(uint8_t* rdram, recomp_context* ctx) {
         min = 1000u;
     }
     const uint32_t authored = min;
-    if (min < 900u) {
+    static const bool push_fog = env_flag_on("TUROK2_FOG_PUSH");
+    if (push_fog && min < 900u) {
         const float remaining = (1000.0f - static_cast<float>(min)) / kFogDistanceScale;
         float pushed = 1000.0f - remaining;
         if (pushed < static_cast<float>(min)) {

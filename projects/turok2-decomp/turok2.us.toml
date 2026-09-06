@@ -1364,7 +1364,8 @@ text = """
 """
 
 # RDP fog min is the low 16 bits of packed int CCamera.m_FogStart (+0x526).
-# Push min toward 1000 after the lhu so far clip 2x is not a fog wall.
+# Cap min at 996 so fm=128000/(1000-min) does not wrap. Do not push
+# fog 2× — far-clip scale is gone and that push revealed extra geometry.
 [[patches.hook]]
 func = "func_0027E000"
 before_vram = 0x0027E530
