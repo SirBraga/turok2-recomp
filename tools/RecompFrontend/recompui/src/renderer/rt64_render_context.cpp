@@ -23,6 +23,8 @@
 #include "renderer.h"
 #include "recompui/recompui.h"
 #include "recompui/config.h"
+
+extern "C" uint32_t turok2_host_vi_hz(void);
 #include "concurrentqueue.h"
 
 using namespace recompui;
@@ -196,36 +198,11 @@ void renderer::apply_extra_graphics_options() {
     }
 
     try {
-        const auto filtering = recompui::config::graphics::get_filtering();
-        switch (filtering) {
-            case recompui::config::graphics::TextureFiltering::Nearest:
-                live_rt64_application->userConfig.filtering = RT64::UserConfiguration::Filtering::Nearest;
-                break;
-            case recompui::config::graphics::TextureFiltering::Linear:
-                live_rt64_application->userConfig.filtering = RT64::UserConfiguration::Filtering::Linear;
-                break;
-            case recompui::config::graphics::TextureFiltering::PixelScaling:
-            default:
-                live_rt64_application->userConfig.filtering = RT64::UserConfiguration::Filtering::AntiAliasedPixelScaling;
-                break;
-        }
+        // Filtering, post-blend dither and 2D upscaling are left at RT64's own
+        // defaults. Forcing Upscale2D::All was part of the HUD work and made
+        // gameplay HUD draw over the Rumble Pak screen.
         live_rt64_application->userConfig.developerMode =
             recompui::config::graphics::get_developer_mode();
-        live_rt64_application->emulatorConfig.dither.postBlendNoise =
-            recompui::config::graphics::get_post_blend_dither();
-        live_rt64_application->emulatorConfig.dither.postBlendNoiseNegative = false;
-        switch (recompui::config::graphics::get_upscale_2d()) {
-            case recompui::config::graphics::Upscale2D::Original:
-                live_rt64_application->userConfig.upscale2D = RT64::UserConfiguration::Upscale2D::Original;
-                break;
-            case recompui::config::graphics::Upscale2D::ScaledOnly:
-                live_rt64_application->userConfig.upscale2D = RT64::UserConfiguration::Upscale2D::ScaledOnly;
-                break;
-            case recompui::config::graphics::Upscale2D::All:
-            default:
-                live_rt64_application->userConfig.upscale2D = RT64::UserConfiguration::Upscale2D::All;
-                break;
-        }
         live_rt64_application->updateUserConfig(false);
         live_rt64_application->updateEmulatorConfig();
     } catch (const std::exception&) {
@@ -516,16 +493,7 @@ void renderer::RT64Context::send_dl(const OSTask* task) {
     if (display == 0) {
         display = 60;
     }
-    static const bool unique_120 = [] {
-        const char* authored = std::getenv("TUROK2_AUTHORED_CADENCE");
-        if (authored != nullptr && authored[0] != '\0' && std::strcmp(authored, "0") != 0) {
-            return false;
-        }
-        // 120 is the shipping cadence. TUROK2_UNIQUE_60=1 is the opt-out.
-        const char* sixty = std::getenv("TUROK2_UNIQUE_60");
-        return !(sixty != nullptr && sixty[0] != '\0' && std::strcmp(sixty, "0") != 0);
-    }();
-    const uint32_t source_hz = unique_120 ? 120u : 60u;
+    const uint32_t source_hz = turok2_host_vi_hz();
     app->userConfig.refreshRate = RT64::UserConfiguration::RefreshRate::Manual;
     app->userConfig.refreshRateTarget = 60;
     app->state->setRefreshRate(static_cast<uint16_t>(source_hz));

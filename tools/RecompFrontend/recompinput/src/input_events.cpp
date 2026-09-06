@@ -217,6 +217,14 @@ bool sdl_event_filter(void* userdata, SDL_Event* event) {
             recompinput::add_rotation_deltas(event->csensor.which, rot_x, rot_y);
         }
         break;
+    case SDL_EventType::SDL_MOUSEBUTTONDOWN:
+        if (binding::is_binding() && binding::get_scanning_device() == InputDevice::Keyboard) {
+            binding::set_scanned_input({ InputType::Mouse, event->button.button });
+        }
+        else {
+            queue_if_enabled(event);
+        }
+        break;
     case SDL_EventType::SDL_MOUSEMOTION:
         if (!recompinput::game_input_disabled()) {
             SDL_MouseMotionEvent* motion_event = &event->motion;

@@ -5,6 +5,8 @@
 #include "rt64_rsp.h"
 
 #include <cassert>
+#include <cstdio>
+#include <cstdlib>
 
 #include "../include/rt64_extended_gbi.h"
 #include "common/rt64_common.h"
@@ -1050,6 +1052,20 @@ namespace RT64 {
     }
 
     void RSP::drawIndexedTri(uint32_t a, uint32_t b, uint32_t c, bool rawGlobalIndices) {
+        // Diagnostic for the Turok 2 Rev.01 title: drop every 3D triangle to
+        // tell "the 3D pass poisons the frame" apart from "the frame never
+        // presents". Off unless TUROK2_RT64_STRIP_TRIS is set.
+        static const bool stripTris = [] {
+            const char *env = std::getenv("TUROK2_RT64_STRIP_TRIS");
+            return (env != nullptr) && (env[0] != '\0') && (env[0] != '0');
+        }();
+        if (stripTris) {
+            static uint64_t skipped = 0;
+            if (skipped++ < 3) {
+                std::fprintf(stderr, "[rt64:strip] skipping RSP triangles\n");
+            }
+            return;
+        }
         // Copy mode is not supported when drawing regular tris and crashes the hardware.
         const uint32_t cycleType = state->rdp->otherMode.cycleType();
         assert(cycleType != G_CYC_COPY);
@@ -1157,6 +1173,35 @@ namespace RT64 {
                 fbPair.drawColorRect.merge(drawRect);
                 if (otherModeStack[otherModeStackSize - 1].zUpd()) {
                     fbPair.drawDepthRect.merge(drawRect);
+                }
+            }
+
+            if (std::getenv("TUROK2_TRI_SCREEN") != nullptr) {
+                static uint64_t seen = 0;
+                static uint64_t empty_n = 0;
+                seen++;
+                if (drawRect.isNull()) {
+                    empty_n++;
+                }
+                const bool sample = (seen == 1) || (seen == 200) || (seen == 2000) || (seen == 20000);
+                if (sample) {
+                    const float x0 = float(posScreen[globalIndices[0]][0]);
+                    const float y0 = float(posScreen[globalIndices[0]][1]);
+                    const float w0 = float(workload.drawData.posTransformed[globalIndices[0]][3]);
+                    const interop::RSPViewport &vp = viewportStack[viewportStackSize - 1];
+                    std::fprintf(stderr,
+                        "[tri:screen] n=%llu empty=%llu vis=%d null=%d "
+                        "p0=(%.1f,%.1f) w0=%.3f vp.s=(%.1f,%.1f) vp.t=(%.1f,%.1f) "
+                        "rect=(%d,%d)-(%d,%d)\n",
+                        (unsigned long long)seen, (unsigned long long)empty_n,
+                        visibleTri ? 1 : 0, drawRect.isNull() ? 1 : 0,
+                        x0, y0, w0,
+                        float(vp.scale.x), float(vp.scale.y),
+                        float(vp.translate.x), float(vp.translate.y),
+                        drawRect.isNull() ? 0 : drawRect.left(false),
+                        drawRect.isNull() ? 0 : drawRect.top(false),
+                        drawRect.isNull() ? 0 : drawRect.right(true),
+                        drawRect.isNull() ? 0 : drawRect.bottom(true));
                 }
             }
         }

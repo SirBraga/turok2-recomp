@@ -3858,6 +3858,8 @@ L_00282764:
     }
     // 0x0028276C: addiu       $s0, $s0, 0xC
     ctx->r16 = ADD32(ctx->r16, 0XC);
+        turok2_patch_sky_layer_corners(rdram, ctx);
+
     // 0x00282770: addu        $s4, $zero, $zero
     ctx->r20 = ADD32(0, 0);
     // 0x00282774: addiu       $s5, $sp, 0x38

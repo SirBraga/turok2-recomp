@@ -220,21 +220,14 @@ extern moodycamel::LightweightSemaphore graphics_shutdown_ready;
 
 void set_dummy_vi(bool odd);
 
-static bool turok2_unique_120() {
-    static const bool enabled = [] {
-        const char* authored = std::getenv("TUROK2_AUTHORED_CADENCE");
-        if (authored != nullptr && authored[0] != '\0' && std::strcmp(authored, "0") != 0) {
-            return false;
-        }
-        // 120 is the shipping cadence. TUROK2_UNIQUE_60=1 is the opt-out.
-        const char* sixty = std::getenv("TUROK2_UNIQUE_60");
-        return !(sixty != nullptr && sixty[0] != '\0' && std::strcmp(sixty, "0") != 0);
-    }();
-    return enabled;
-}
+extern "C" uint32_t turok2_host_vi_hz(void);
 
 static uint32_t host_vi_hz() {
-    return turok2_unique_120() ? 120u : 60u;
+    return turok2_host_vi_hz();
+}
+
+static bool turok2_unique_120() {
+    return host_vi_hz() >= 120u;
 }
 
 void vi_thread_func() {
@@ -1062,6 +1055,8 @@ namespace {
         uint32_t cimg_siz = 0;
         uint32_t cimg_address = 0;
         uint32_t fillrects = 0;
+        uint32_t vtx_dumps = 0;
+        uint32_t mtx_dumps = 0;
 
         // Extents of everything drawn, to tell a game that overdraws its target
         // apart from a presenter that crops a correctly drawn one.
@@ -1464,9 +1459,67 @@ namespace {
             bool advance = true;
 
             switch (op) {
-            case 0x01: // G_VTX
-                vertices += (w0 >> 12) & 0xFF;
+            case 0x01: { // G_VTX
+                const uint32_t vtx_n = (w0 >> 12) & 0xFF;
+                vertices += vtx_n;
+                if (verbose && (stats.vtx_dumps < 3)) {
+                    const uint32_t phys = resolve(w1);
+                    fprintf(stderr, "[dl:vtx] task #%u: n=%u v0=%u seg=%08X phys=%08X\n",
+                        task_index, vtx_n, (w0 >> 1) & 0x7F, w1, phys);
+                    for (uint32_t v = 0; v < vtx_n && v < 2; v++) {
+                        const uint32_t base = phys + v * 16;
+                        const uint32_t a = read_word(base);
+                        const uint32_t b = read_word(base + 4);
+                        const uint32_t c = read_word(base + 8);
+                        const uint32_t d = read_word(base + 12);
+                        const int16_t x = (int16_t)(a >> 16);
+                        const int16_t y = (int16_t)(a & 0xFFFF);
+                        const int16_t z = (int16_t)(b >> 16);
+                        fprintf(stderr,
+                            "[dl:vtx]   v%u xyz=(%d,%d,%d) flag=%04X tc=%08X cn=%08X\n",
+                            v, x, y, z, b & 0xFFFF, c, d);
+                    }
+                    stats.vtx_dumps++;
+                }
                 break;
+            }
+
+            case 0xDA: { // G_MTX
+                if (verbose && (stats.mtx_dumps < 4)) {
+                    const uint32_t phys = resolve(w1);
+                    fprintf(stderr, "[dl:mtx] task #%u: w0=%08X seg=%08X phys=%08X\n",
+                        task_index, w0, w1, phys);
+                    fprintf(stderr, "[dl:mtx]   raw");
+                    for (uint32_t i = 0; i < 16; i++) {
+                        fprintf(stderr, " %08X", read_word(phys + i * 4));
+                    }
+                    fprintf(stderr, "\n");
+                    uint32_t raw[16] = {};
+                    for (uint32_t i = 0; i < 16; i++) {
+                        raw[i] = read_word(phys + i * 4);
+                    }
+                    // F3D Mtx: 8 words of packed s16 integer parts, then 8 of u16 fracs.
+                    int16_t ip[16] = {};
+                    uint16_t fp[16] = {};
+                    for (uint32_t i = 0; i < 8; i++) {
+                        ip[i * 2] = (int16_t)(raw[i] >> 16);
+                        ip[i * 2 + 1] = (int16_t)(raw[i] & 0xFFFF);
+                        fp[i * 2] = (uint16_t)(raw[8 + i] >> 16);
+                        fp[i * 2 + 1] = (uint16_t)(raw[8 + i] & 0xFFFF);
+                    }
+                    fprintf(stderr, "[dl:mtx]   ");
+                    for (uint32_t r = 0; r < 4; r++) {
+                        for (uint32_t col = 0; col < 4; col++) {
+                            const uint32_t k = r * 4 + col;
+                            const float f = (float)ip[k] + (float)fp[k] / 65536.0f;
+                            fprintf(stderr, "%8.3f ", f);
+                        }
+                        fprintf(stderr, "%s", (r == 3) ? "\n" : "\n[dl:mtx]   ");
+                    }
+                    stats.mtx_dumps++;
+                }
+                break;
+            }
 
             case 0x05: // G_TRI1
                 triangles += 1;
@@ -1917,11 +1970,21 @@ void ultramodern::submit_rsp_task(RDRAM_ARG PTR(OSTask) task_) {
             return (env != nullptr) ? (uint32_t)strtoul(env, nullptr, 10) : 0xFFFFFFFFU;
         }();
 
-        const bool verbose = (this_index == 0) || (this_index == 400) || (this_index == requested_frame);
-
         DisplayListStats stats;
         walk_gfx_display_list(rdram, task->t.data_ptr, task->t.data_size & 0x1FFFFFFFU,
-                              this_index, verbose, stats);
+                              this_index, false, stats);
+
+        static bool first_tri_dumped = false;
+        const bool verbose = (this_index == 0) || (this_index == 400) || (this_index == requested_frame) ||
+            ((stats.triangles >= 80) && !first_tri_dumped);
+        if ((stats.triangles >= 80) && !first_tri_dumped) {
+            first_tri_dumped = true;
+        }
+        if (verbose) {
+            DisplayListStats dump_stats;
+            walk_gfx_display_list(rdram, task->t.data_ptr, task->t.data_size & 0x1FFFFFFFU,
+                                  this_index, true, dump_stats);
+        }
 
         // Optional compact frame trace used to correlate what a display list
         // rendered with the framebuffer selected by osViSwapBuffer.  This is

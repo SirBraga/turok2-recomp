@@ -3,6 +3,7 @@
 #include "recompui.h"
 #include <ultramodern/ultramodern.hpp>
 #include "ui_utils.h"
+#include "recompinput/input_binding.h"
 
 namespace recompui {
     static const float padding = 8.0f;
@@ -13,9 +14,9 @@ namespace recompui {
         enable_focus();
         apply_sizing_styling(this);
 
-        set_border_color(theme::color::ElevatedSoft);
-        set_background_color(theme::color::ElevatedSoft);
-        set_color(theme::color::TextDim);
+        set_border_color(theme::color::Background3);
+        set_background_color(theme::color::Background3);
+        set_color(theme::color::Text);
 
         set_cursor(Cursor::Pointer);
 
@@ -48,7 +49,11 @@ namespace recompui {
         unknown_svg_el->set_translate_2D(-50.0f, -50.0f, recompui::Unit::Percent);
         set_binding(mapped_binding);
 
+        bound_text_el->set_pointer_events(PointerEvents::None);
+        unknown_svg_el->set_pointer_events(PointerEvents::None);
+
         recording_parent = context.create_element<Element>(this);
+        recording_parent->set_pointer_events(PointerEvents::None);
         recording_circle = context.create_element<Element>(recording_parent);
         recording_edge = context.create_element<Element>(recording_parent);
         recording_svg = context.create_element<Svg>(recording_edge, "icons/RecordBorder.svg");
@@ -56,7 +61,7 @@ namespace recompui {
     }
 
     void BindingButton::apply_sizing_styling(Element *el) {
-        const float height = 56.0f - (theme::border::width * 2.0f);
+        const float height = 44.0f - (theme::border::width * 2.0f);
         el->set_display(Display::Flex);
         el->set_position(Position::Relative);
 
@@ -68,6 +73,7 @@ namespace recompui {
         el->set_justify_content(JustifyContent::Center);
 
         el->set_width(100.0f, recompui::Unit::Percent);
+        el->set_min_width(96.0f);
         el->set_height(height);
         el->set_padding(padding);
 
@@ -158,10 +164,13 @@ namespace recompui {
         switch (e.type) {
         case EventType::Click:
             if (is_enabled()) {
+                // RmlUi delivers Click on target and bubble. A cancel-on-second
+                // click here aborted the bind in the same press, then
+                // skip_events stayed true and every later click was dropped.
                 for (const auto &function : pressed_callbacks) {
                     function();
                 }
-                set_is_binding(!is_binding);
+                set_is_binding(recompinput::binding::is_binding());
             }
             break;
         case EventType::Hover: 

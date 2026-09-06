@@ -77,6 +77,12 @@ namespace recompui {
             // {ultramodern::renderer::Antialiasing::MSAA8X, "MSAA8X"},
         };
 
+        static EnumOptionVector engine_hz_options = {
+            {graphics::EngineHz::Original, "Original"},
+            {graphics::EngineHz::Sixty, "60"},
+            {graphics::EngineHz::OneTwenty, "120"},
+        };
+
         static EnumOptionVector refresh_rate_options = {
             {ultramodern::renderer::RefreshRate::Original, "Original"},
             {ultramodern::renderer::RefreshRate::Display, "Display"},
@@ -87,18 +93,6 @@ namespace recompui {
             {ultramodern::renderer::HighPrecisionFramebuffer::Auto, "Auto"},
             {ultramodern::renderer::HighPrecisionFramebuffer::On, "On"},
             {ultramodern::renderer::HighPrecisionFramebuffer::Off, "Off"},
-        };
-
-        static EnumOptionVector filtering_options = {
-            {graphics::TextureFiltering::Nearest, "Nearest"},
-            {graphics::TextureFiltering::Linear, "Linear"},
-            {graphics::TextureFiltering::PixelScaling, "PixelScaling", "Pixel Scaling"},
-        };
-
-        static EnumOptionVector upscale_2d_options = {
-            {graphics::Upscale2D::Original, "Original"},
-            {graphics::Upscale2D::ScaledOnly, "ScaledOnly", "Scaled Only"},
-            {graphics::Upscale2D::All, "All"},
         };
 
         static EnumOptionVector hud_ratio_mode_options = {
@@ -193,8 +187,11 @@ namespace recompui {
             recompui::renderer::apply_extra_graphics_options();
         }
 
+        // Only Field of View is user facing. The rest keep the values the port
+        // ships with, so RT64 and the gameplay patches behave the same as when
+        // these were exposed as options.
         graphics::TextureFiltering graphics::get_filtering() {
-            return get_graphics_enum_value<TextureFiltering>(graphics::options::filtering_option);
+            return TextureFiltering::PixelScaling;
         }
 
         bool graphics::get_developer_mode() {
@@ -202,15 +199,15 @@ namespace recompui {
         }
 
         bool graphics::get_post_blend_dither() {
-            return get_graphics_bool_value(graphics::options::dither_option);
+            return false;
         }
 
         graphics::Upscale2D graphics::get_upscale_2d() {
-            return get_graphics_enum_value<Upscale2D>(graphics::options::upscale_2d_option);
+            return Upscale2D::All;
         }
 
         double graphics::get_hud_scale() {
-            return get_graphics_number_value<double>(graphics::options::hud_scale);
+            return 1.0;
         }
 
         double graphics::get_fov_scale() {
@@ -218,11 +215,15 @@ namespace recompui {
         }
 
         double graphics::get_far_scale() {
-            return get_graphics_number_value<double>(graphics::options::far_scale);
+            return 1.0;
         }
 
         double graphics::get_fog_scale() {
-            return get_graphics_number_value<double>(graphics::options::fog_scale);
+            return 1.0;
+        }
+
+        graphics::EngineHz graphics::get_engine_hz() {
+            return get_graphics_enum_value<EngineHz>(graphics::options::engine_hz);
         }
 
         void graphics::update_msaa_supported(bool supported) {
@@ -345,6 +346,18 @@ namespace recompui {
             );
 
             config.add_enum_option(
+                graphics::options::engine_hz,
+                "Hz",
+                "Cadência do motor. <recomp-color primary>Original</recomp-color> é o N64 "
+                "(30 Hz no jogo, 15 Hz nas cinemas). "
+                "<recomp-color primary>60</recomp-color> e <recomp-color primary>120</recomp-color> "
+                "são Updates únicos. Isto muda a jogabilidade — não é o "
+                "<recomp-color primary>Framerate</recomp-color> abaixo (só o present).",
+                engine_hz_options,
+                graphics::EngineHz::OneTwenty
+            );
+
+            config.add_enum_option(
                 graphics::options::rr_option,
                 "Framerate",
                 get_framerate_text(60),
@@ -404,55 +417,11 @@ namespace recompui {
                 true
             );
 
-            config.add_enum_option(
-                graphics::options::filtering_option,
-                "Texture Filtering",
-                "How N64 textures are sampled. <recomp-color primary>Pixel Scaling</recomp-color> keeps texel edges sharp while still smoothing at high resolution. <recomp-color primary>Nearest</recomp-color> is raw texels. <recomp-color primary>Linear</recomp-color> is bilinear.",
-                filtering_options,
-                graphics::TextureFiltering::PixelScaling
-            );
-
-            config.add_bool_option(
-                graphics::options::dither_option,
-                "Post-blend dither",
-                "Simulates the N64's 16-bit framebuffer dither (grain). Leave this off at HD output.",
-                false
-            );
-
-            config.add_enum_option(
-                graphics::options::upscale_2d_option,
-                "HUD / 2D",
-                "How 2D elements (HUD, menus, texrects) are drawn. <recomp-color primary>Original</recomp-color> keeps the N64 240p look. <recomp-color primary>Scaled Only</recomp-color> sharpens 2D that the game already scaled. <recomp-color primary>All</recomp-color> renders every 2D element at the output resolution so the HUD is crisp in HD.",
-                upscale_2d_options,
-                graphics::Upscale2D::All
-            );
-
-            config.add_number_option(
-                graphics::options::hud_scale,
-                "HUD Size",
-                "Scales gameplay HUD numbers and 2D overlays. 1.00 is the original size. Positions stay in the corners; the first-person weapon is not scaled.",
-                0.50, 1.00, 0.05, 2, false, 1.0
-            );
-
             config.add_number_option(
                 graphics::options::fov_scale,
                 "Field of View",
                 "Scales gameplay FOV before the projection matrix. 1.00 is the original vertical FOV. Cinema paths are not scaled. Weapon/HUD on-screen projection is not scaled.",
                 1.0, 1.5, 0.05, 2, false, 1.0
-            );
-
-            config.add_number_option(
-                graphics::options::far_scale,
-                "Draw Distance",
-                "Scales far clip in gameplay. Raise this if widescreen FOV shows pop-in at the horizon. Revert toward 1.00 if sectors vanish.",
-                1.0, 2.0, 0.05, 2, false, 1.0
-            );
-
-            config.add_number_option(
-                graphics::options::fog_scale,
-                "Fog Distance",
-                "Scales fog start in gameplay. If raising fog punches holes in geometry, leave this at 1.00 and keep only FOV.",
-                1.0, 2.0, 0.05, 2, false, 1.0
             );
 
             return config;

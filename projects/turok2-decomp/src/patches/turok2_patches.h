@@ -7,10 +7,7 @@
 extern "C" {
 #endif
 
-void turok2_set_camera_scales(float fov_scale, float far_scale, float fog_scale);
-void turok2_set_hud_scale(float hud_scale);
-void turok2_patch_hud_draw_scale(uint8_t* rdram, recomp_context* ctx);
-void turok2_patch_hud_icon_scale(uint8_t* rdram, recomp_context* ctx);
+void turok2_set_camera_scales(float fov_scale);
 
 void turok2_patch_native_60(uint8_t* rdram, recomp_context* ctx);
 void turok2_patch_lock_increment(uint8_t* rdram, recomp_context* ctx);
@@ -43,6 +40,10 @@ void turok2_patch_cinema_region(uint8_t* rdram, recomp_context* ctx);
 int turok2_cinema_skip_this_camera(uint8_t* rdram, recomp_context* ctx);
 void turok2_patch_fog_position(uint8_t* rdram, recomp_context* ctx);
 void turok2_patch_widen_camera_culling(uint8_t* rdram, recomp_context* ctx);
+void turok2_patch_expand_view_bounds(uint8_t* rdram, recomp_context* ctx);
+void turok2_patch_scene_draw_note(uint8_t* rdram, recomp_context* ctx);
+void turok2_patch_world_draw_gate(uint8_t* rdram, recomp_context* ctx);
+void turok2_patch_sky_layer_corners(uint8_t* rdram, recomp_context* ctx);
 void turok2_patch_fix_jalr(uint8_t* rdram, recomp_context* ctx);
 void turok2_patch_jalr_done(uint8_t* rdram, recomp_context* ctx);
 void turok2_patch_restore_resource_table(uint8_t* rdram, recomp_context* ctx);

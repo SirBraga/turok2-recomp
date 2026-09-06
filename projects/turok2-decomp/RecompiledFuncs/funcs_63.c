@@ -8025,6 +8025,8 @@ L_0027F584:
     ctx->r2 = S32(0X8013 << 16);
     // 0x0027F590: lw          $v0, 0x940($v0)
     ctx->r2 = MEM_W(ctx->r2, 0X940);
+        turok2_patch_world_draw_gate(rdram, ctx);
+
     // 0x0027F594: bne         $v0, $zero, L_0027F5A8
     if (ctx->r2 != 0) {
         // 0x0027F598: nop

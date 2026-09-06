@@ -3,6 +3,7 @@
 #include "input_state.h"
 #include "players.h"
 #include "profiles.h"
+#include <cstdio>
 
 namespace recompinput {
 
@@ -66,12 +67,27 @@ namespace recompinput {
     }
 
     void binding::set_scanned_input(recompinput::InputField value) {
+        // The controls page reads the single-player keyboard / pad profiles.
+        // Writing to get_input_profile_for_player can miss that slot if the
+        // player assignment drifted, so the glyph never updates.
+        int profile_index = players::is_single_player_mode()
+            ? (BindingState.device == InputDevice::Keyboard
+                   ? profiles::get_sp_keyboard_profile_index()
+                   : profiles::get_sp_controller_profile_index())
+            : profiles::get_input_profile_for_player(
+                  BindingState.player_index, BindingState.device);
         profiles::set_input_binding(
-            profiles::get_input_profile_for_player(BindingState.player_index, BindingState.device),
+            profile_index,
             BindingState.game_input,
             BindingState.binding_index,
             value
         );
+        std::fprintf(stderr, "[ui] bind set profile=%d input=%d slot=%d type=%d id=%d\n",
+            profile_index,
+            static_cast<int>(BindingState.game_input),
+            BindingState.binding_index,
+            static_cast<int>(value.input_type),
+            value.input_id);
         binding::stop_scanning();
     }
 

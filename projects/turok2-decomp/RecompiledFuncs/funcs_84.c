@@ -1,6 +1,11 @@
 #include "recomp.h"
 #include "funcs.h"
 
+extern void turok2_patch_scene_draw_emit(uint8_t* rdram, recomp_context* ctx);
+extern void turok2_patch_scene_vis_pass(uint8_t* rdram, recomp_context* ctx);
+extern void turok2_patch_scene_sec_try(uint8_t* rdram, recomp_context* ctx);
+extern int turok2_scene_force_sec(void);
+
 RECOMP_FUNC void func_00284358(uint8_t* rdram, recomp_context* ctx) {
     uint64_t hi = 0, lo = 0, result = 0;
     int c1cs = 0;
@@ -69,6 +74,8 @@ RECOMP_FUNC void func_002222E0(uint8_t* rdram, recomp_context* ctx) {
     ctx->r9 = MEM_W(ctx->r18, 0X64);
     // 0x00222328: addu        $s4, $a0, $zero
     ctx->r20 = ADD32(ctx->r4, 0);
+        turok2_patch_world_draw_gate(rdram, ctx);
+
     // 0x0022232C: beq         $v0, $zero, L_00222344
     if (ctx->r2 == 0) {
         // 0x00222330: sw          $t1, 0x1C($sp)
@@ -381,6 +388,8 @@ L_00222508:
     ctx->r30 = ADD32(0, 0);
     // 0x0022250C: lw          $t1, 0x14A8($s4)
     ctx->r9 = MEM_W(ctx->r20, 0X14A8);
+        turok2_patch_scene_draw_note(rdram, ctx);
+
     // 0x00222510: addiu       $v0, $s4, 0x14AC
     ctx->r2 = ADD32(ctx->r20, 0X14AC);
     // 0x00222514: blez        $t1, L_002228AC
@@ -394,6 +403,10 @@ L_00222508:
     // 0x0022251C: addu        $s5, $v0, $zero
     ctx->r21 = ADD32(ctx->r2, 0);
 L_00222520:
+        turok2_patch_scene_sec_try(rdram, ctx);
+        if (turok2_scene_force_sec()) {
+            goto L_00222584;
+        }
     // 0x00222520: lw          $v0, 0x4($s5)
     ctx->r2 = MEM_W(ctx->r21, 0X4);
     // 0x00222524: lwc1        $f0, 0x338($s2)
@@ -468,6 +481,7 @@ L_00222520:
     }
     // 0x00222580: nop
 
+L_00222584:
     // 0x00222584: lw          $a1, 0x0($s5)
     ctx->r5 = MEM_W(ctx->r21, 0X0);
     // 0x00222588: jal         0x0020565C
@@ -521,6 +535,8 @@ L_002225BC:
     ctx->r2 = MEM_W(ctx->r2, 0X4);
     // 0x002225D0: and         $v0, $v0, $t1
     ctx->r2 = ctx->r2 & ctx->r9;
+        turok2_patch_scene_vis_pass(rdram, ctx);
+
     // 0x002225D4: beql        $v0, $zero, L_0022273C
     if (ctx->r2 == 0) {
         // 0x002225D8: addiu       $s1, $s1, 0x1
@@ -562,6 +578,8 @@ L_002225FC:
     ctx->r9 = MEM_W(ctx->r29, 0X1C);
     // 0x00222604: and         $v0, $t1, $v0
     ctx->r2 = ctx->r9 & ctx->r2;
+        turok2_patch_scene_vis_pass(rdram, ctx);
+
     // 0x00222608: beql        $v0, $zero, L_0022273C
     if (ctx->r2 == 0) {
         // 0x0022260C: addiu       $s1, $s1, 0x1
@@ -572,6 +590,9 @@ L_002225FC:
     // 0x0022260C: addiu       $s1, $s1, 0x1
     ctx->r17 = ADD32(ctx->r17, 0X1);
     skip_2:
+        if (turok2_scene_force_sec()) {
+            goto L_002226B0;
+        }
     // 0x00222610: lwc1        $f1, 0x344($s2)
     ctx->f_odd[(1 - 1) * 2] = MEM_W(ctx->r18, 0X344);
     // 0x00222614: lwc1        $f0, 0x68($s0)
@@ -699,6 +720,7 @@ L_002225FC:
     ctx->r5 = ADD32(ctx->r16, 0X68);
     after_7:
     // 0x002226A8: beql        $v0, $zero, L_0022273C
+        turok2_patch_scene_vis_pass(rdram, ctx);
     if (ctx->r2 == 0) {
         // 0x002226AC: addiu       $s1, $s1, 0x1
         ctx->r17 = ADD32(ctx->r17, 0X1);
@@ -708,6 +730,7 @@ L_002225FC:
     // 0x002226AC: addiu       $s1, $s1, 0x1
     ctx->r17 = ADD32(ctx->r17, 0X1);
     skip_8:
+L_002226B0:
     // 0x002226B0: lhu         $v0, 0x88($s0)
     ctx->r2 = MEM_HU(ctx->r16, 0X88);
     // 0x002226B4: andi        $v0, $v0, 0x8
@@ -857,6 +880,7 @@ L_00222768:
     ctx->r2 = MEM_W(ctx->r2, 0X4);
     // 0x00222774: and         $v0, $v0, $t1
     ctx->r2 = ctx->r2 & ctx->r9;
+        turok2_patch_scene_vis_pass(rdram, ctx);
     // 0x00222778: beql        $v0, $zero, L_0022288C
     if (ctx->r2 == 0) {
         // 0x0022277C: addiu       $s1, $s1, 0x1
@@ -887,6 +911,7 @@ L_00222768:
     ctx->r9 = MEM_W(ctx->r29, 0X1C);
     // 0x00222798: and         $v0, $t1, $v0
     ctx->r2 = ctx->r9 & ctx->r2;
+        turok2_patch_scene_vis_pass(rdram, ctx);
     // 0x0022279C: beql        $v0, $zero, L_0022288C
     if (ctx->r2 == 0) {
         // 0x002227A0: addiu       $s1, $s1, 0x1
@@ -897,6 +922,9 @@ L_00222768:
     // 0x002227A0: addiu       $s1, $s1, 0x1
     ctx->r17 = ADD32(ctx->r17, 0X1);
     skip_11:
+        if (turok2_scene_force_sec()) {
+            goto L_00222850;
+        }
     // 0x002227A4: lwc1        $f1, 0x344($s2)
     ctx->f_odd[(1 - 1) * 2] = MEM_W(ctx->r18, 0X344);
     // 0x002227A8: lwc1        $f0, 0x14C($s0)
@@ -1036,6 +1064,7 @@ L_00222768:
     ctx->r5 = ADD32(ctx->r16, 0X14C);
     after_10:
     // 0x00222848: beql        $v0, $zero, L_0022288C
+        turok2_patch_scene_vis_pass(rdram, ctx);
     if (ctx->r2 == 0) {
         // 0x0022284C: addiu       $s1, $s1, 0x1
         ctx->r17 = ADD32(ctx->r17, 0X1);
@@ -1045,6 +1074,7 @@ L_00222768:
     // 0x0022284C: addiu       $s1, $s1, 0x1
     ctx->r17 = ADD32(ctx->r17, 0X1);
     skip_18:
+L_00222850:
     // 0x00222850: lhu         $v0, 0x16C($s0)
     ctx->r2 = MEM_HU(ctx->r16, 0X16C);
     // 0x00222854: andi        $v0, $v0, 0x20
@@ -1083,6 +1113,7 @@ L_00222880:
     // 0x00222880: jal         0x002152AC
     // 0x00222884: addu        $a0, $s0, $zero
     ctx->r4 = ADD32(ctx->r16, 0);
+        turok2_patch_scene_draw_emit(rdram, ctx);
     func_002152AC(rdram, ctx);
         goto after_11;
     // 0x00222884: addu        $a0, $s0, $zero

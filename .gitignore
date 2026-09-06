@@ -46,6 +46,15 @@ deliverables/
 *.mov
 *.mp4
 
+# Isolated Angrylion/Mupen A/B (ROM, clones, plugins, generated cfg).
+# Keep tools/angrylion-ab/launch-turok2.sh tracked.
+tools/angrylion-ab/src/
+tools/angrylion-ab/build/
+tools/angrylion-ab/plugins/
+tools/angrylion-ab/rom/
+tools/angrylion-ab/config/
+tools/angrylion-ab/screenshots/
+
 # The dependencies under tools/ were standalone git repositories. Their
 # histories are parked here so the move stays reversible, but they are not part
 # of this repository.

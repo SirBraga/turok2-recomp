@@ -6,6 +6,7 @@
 #include "renderer.h"
 #include "elements/ui_modal.h"
 #include "elements/ui_button.h"
+#include "elements/ui_label.h"
 #include "config/ui_config_page_options_menu.h"
 
 #include "librecomp/mods.hpp"
@@ -703,7 +704,15 @@ ModMenu::ModMenu(ResourceId rid, Element *parent) : Element(rid, parent) {
         body_empty_container->set_display(Display::None);
         {
             context.create_element<Element>(body_empty_container);
-            context.create_element<Label>(body_empty_container, "You have no mods. Go get some!", LabelStyle::Large);
+            recompui::Label* empty_title = context.create_element<Label>(
+                body_empty_container, "Nenhum mod instalado", LabelStyle::Large);
+            empty_title->set_color(theme::color::Text);
+            recompui::Label* empty_body = context.create_element<Label>(
+                body_empty_container,
+                "Arraste um .rtz para esta janela, ou use Instalar mods.\nA pasta e runtime-data/mods.",
+                LabelStyle::Normal);
+            empty_body->set_color(theme::color::TextDim);
+            empty_body->set_margin_top(12.0f);
             context.create_element<Element>(body_empty_container);
         } // body_empty_container
 
@@ -720,7 +729,7 @@ ModMenu::ModMenu(ResourceId rid, Element *parent) : Element(rid, parent) {
         footer_container->set_border_bottom_right_radius(16.0f);
         {
             Button* configure_button = mod_details_panel->get_configure_button();
-            install_mods_button = context.create_element<Button>(footer_container, "Install Mods", recompui::ButtonStyle::Primary);
+            install_mods_button = context.create_element<Button>(footer_container, "Instalar mods", recompui::ButtonStyle::Primary);
             install_mods_button->add_pressed_callback([this](){ open_install_dialog(); });
 
             Element* footer_spacer = context.create_element<Element>(footer_container);
@@ -729,7 +738,7 @@ ModMenu::ModMenu(ResourceId rid, Element *parent) : Element(rid, parent) {
             refresh_button = context.create_element<IconButton>(footer_container, "icons/Reset.svg", recompui::ButtonStyle::Secondary, recompui::IconButtonSize::XLarge);
             refresh_button->add_pressed_callback([this](){ refresh_mods(true); });
 
-            mods_folder_button = context.create_element<Button>(footer_container, "Open Mods Folder", recompui::ButtonStyle::Tertiary);
+            mods_folder_button = context.create_element<Button>(footer_container, "Abrir pasta", recompui::ButtonStyle::Tertiary);
             mods_folder_button->add_pressed_callback([this](){ open_mods_folder(); });
         } // footer_container
     } // this

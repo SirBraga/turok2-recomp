@@ -1,5 +1,6 @@
 #include "base/ui_game_option.h"
 #include "ui_utils.h"
+#include "ui_theme.h"
 
 namespace recompui {
     GameOption::GameOption(
@@ -35,13 +36,16 @@ namespace recompui {
         disabled_style.set_cursor(Cursor::None);
         
         auto context = get_current_context();
-        label = context.create_element<Label>(this, title, theme::Typography::LabelLG);
+        label = context.create_element<Label>(this, title, theme::Typography::LabelMD);
         set_styles();
     }
 
     void GameOption::set_styles() {
         set_width(100.0f, Unit::Percent);
-        set_padding(16.0f);
+        set_padding_top(10.0f);
+        set_padding_bottom(10.0f);
+        set_padding_left(12.0f);
+        set_padding_right(12.0f);
         set_border_radius(theme::border::radius_sm);
         set_background_color(theme::color::Transparent);
         set_color(theme::color::TextDim);
@@ -115,5 +119,22 @@ namespace recompui {
 
     void GameOption::set_callback(std::function<void()> new_callback) {
         callback = new_callback;
+    }
+
+    void GameOption::set_primary_action(bool primary) {
+        if (primary) {
+            set_background_color(theme::color::Primary);
+            set_color(theme::color::TextActive);
+            if (label) {
+                label->set_color(theme::color::TextActive);
+            }
+            hover_style.set_background_color(theme::color::PrimaryL);
+            hover_style.set_color(theme::color::TextActive);
+            focus_style.set_background_color(theme::color::PrimaryL);
+            focus_style.set_color(theme::color::TextActive);
+        } else {
+            set_styles();
+        }
+        apply_styles();
     }
 }

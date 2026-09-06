@@ -1356,24 +1356,6 @@ text = """
     turok2_patch_scale_hud_timer(rdram, ctx);
 """
 
-# Gameplay HUD 2D size: func_0027B320 loads ScaleX/ScaleY from the caller's
-# stack before COnScreen-style draw. Pixel X/Y stay unscaled so corners hold.
-[[patches.hook]]
-func = "func_0027B320"
-before_vram = 0x0027B3BC
-text = """
-    turok2_patch_hud_draw_scale(rdram, ctx);
-"""
-
-# 3D HUD digits/icons: func_00277CF0 feeds the same ScaleX/Y into func_0027A7A0.
-# $f22/$f24 are loaded by 0x00277D18 / 0x00277D24. Pixel pos stays in $f21/$f20.
-[[patches.hook]]
-func = "func_00277CF0"
-before_vram = 0x00277D58
-text = """
-    turok2_patch_hud_icon_scale(rdram, ctx);
-"""
-
 [[patches.hook]]
 func = "func_00288C80"
 before_vram = 0x00288D00
@@ -1409,6 +1391,14 @@ text = """
     turok2_patch_cinema_region(rdram, ctx);
 """
 
+# After vis bits: 15 Hz path-camera snapshot. Cinema time stays 120.
+[[patches.hook]]
+func = "func_0027D160"
+before_vram = 0x0027DF00
+text = """
+    turok2_patch_cinema_cam_15(rdram, ctx);
+"""
+
 # CCameraPool::Draw always submits main first. Skip that jal while a
 # path camera is on the +0x20 list. Implemented as a wrap in funcs_19.c
 # (a hook cannot skip the jal). TUROK2_NO_SKIP_MAIN=1 restores both.
@@ -1429,6 +1419,88 @@ func = "func_0027D160"
 before_vram = 0x0027DD08
 text = """
     turok2_patch_widen_camera_culling(rdram, ctx);
+"""
+
+# After func_0026B9E0 writes m_ViewMin/Max. Isolated Adon / stairs
+# flats are func_002222E0 missing the world AABB for one Draw.
+# Expand the cull box around the eye; rebuild ViewVolume from a
+# grown XZ copy, then restore TCorners so sky is unchanged.
+# Opt-out: TUROK2_NO_VIEW_BOUNDS=1.
+[[patches.hook]]
+func = "func_0027D160"
+before_vram = 0x0027DD3C
+text = """
+    turok2_patch_expand_view_bounds(rdram, ctx);
+"""
+
+# After lw m_nActiveGridSections. Reload nsec=0 from ViewMin via
+# m_AnimMin, then log empty / collapsed / MISS world Draws.
+[[patches.hook]]
+func = "func_002222E0"
+before_vram = 0x00222510
+text = """
+    turok2_patch_scene_draw_note(rdram, ctx);
+"""
+
+# Geo vis AND / instance vis AND: force a zero result through.
+[[patches.hook]]
+func = "func_002222E0"
+before_vram = 0x002225D4
+text = """
+    turok2_patch_scene_vis_pass(rdram, ctx);
+"""
+
+[[patches.hook]]
+func = "func_002222E0"
+before_vram = 0x00222608
+text = """
+    turok2_patch_scene_vis_pass(rdram, ctx);
+"""
+
+# Count instance emits (jal func_002152AC).
+[[patches.hook]]
+func = "func_002222E0"
+before_vram = 0x00222880
+text = """
+    turok2_patch_scene_draw_emit(rdram, ctx);
+"""
+
+# Skip Draw AABB vs ViewMin — Load already picked the list.
+[[patches.hook]]
+func = "func_002222E0"
+before_vram = 0x00222520
+text = """
+    turok2_patch_scene_sec_try(rdram, ctx);
+"""
+
+# Isolated 1–2 Draw skips of the 3D world (fog fill, no [scene:draw]).
+# Long streaks are the authored 2D Primagen block. Opt-out:
+# TUROK2_NO_FORCE_WORLD=1.
+[[patches.hook]]
+func = "func_002222E0"
+before_vram = 0x0022232C
+text = """
+    turok2_patch_world_draw_gate(rdram, ctx);
+"""
+
+[[patches.hook]]
+func = "func_0027F2C4"
+before_vram = 0x0027F594
+text = """
+    turok2_patch_world_draw_gate(rdram, ctx);
+"""
+
+# Sky draw copies m_vTCorners XZ onto CSkyLayer.m_Height. Wide cull
+# mutates those same corners for ViewVolume, which shears the cloud
+# mesh. Rebuild the five stack verts from the authored snapshot and
+# grow the plane if look-up collapsed the XZ span. After the clip
+# loop so that clip cannot shrink the cover. Opt-out:
+# TUROK2_NO_SKY_CORNER_FIX=1. Do not turn wide cull off.
+[[patches.hook]]
+func = "func_00282340"
+before_vram = 0x00282770
+text = """
+    turok2_patch_sky_layer_corners(rdram, ctx);
 """
 
 # alRaxOpen / alRaxDecomp live at these T2 addresses (T3: 0x002E1A34 / 0x002E1AF0).
@@ -1582,9 +1654,10 @@ text = """
 """
 
 # nFrames==1 particles die on the first unique Advance, and cFrame>=1
-# kills them again at ~66 ms. Hold both compares before c.lt.s so a
-# oneshot fireball lasts 8 authored 30 Hz frames. Live body is
-# func_00230CB4. Opt-out: TUROK2_NO_EXPLOSION_HOLD=1.
+# kills them again at ~66 ms. Leftover-hold both compares before
+# c.lt.s for one authored 30 Hz step (same clock as 0x6D20 / water /
+# totem laser), then let death + SFX run. Live body is func_00230CB4.
+# Opt-out: TUROK2_NO_EXPLOSION_HOLD=1.
 [[patches.hook]]
 func = "func_00230CB4"
 before_vram = 0x00230DF8
@@ -1592,8 +1665,8 @@ text = """
     turok2_patch_oneshot_particle_hold(rdram, ctx);
 """
 
-# Nearby particles get nFrames forced to 1, which collapses a barrel
-# cluster to oneshot flashes. Keep the authored flipbook length.
+# Nearby particles get nFrames forced to 1 every unique Update. Hold
+# that store to 30/s like 0x6D20; do not skip it forever.
 [[patches.hook]]
 func = "func_00230CB4"
 before_vram = 0x00231128
@@ -1603,7 +1676,8 @@ text = """
 
 # CFxTimer fire when m_Spacing is below one authored step. Time -=
 # increment is already real-time; the 4× short burst is fire-every-
-# unique-Update + m_Count -= 1. Cap fires at 30/s for those timers.
+# unique-Update + m_Count -= 1. Allow the first fire (opening bang),
+# leftover later fires to 30/s like 0x6D20.
 [[patches.hook]]
 func = "func_002367A0"
 before_vram = 0x002367E0

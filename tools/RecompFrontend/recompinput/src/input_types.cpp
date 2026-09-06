@@ -260,6 +260,15 @@ std::string recompinput::InputField::to_string() const {
         return controller_axis_to_string(input_id);
     case InputType::Keyboard:
         return keyboard_input_to_string((SDL_Scancode)input_id);
+    case InputType::Mouse:
+        switch (input_id) {
+        case SDL_BUTTON_LEFT:   return PF_MOUSE_LEFT;
+        case SDL_BUTTON_MIDDLE: return PF_MOUSE_MIDDLE;
+        case SDL_BUTTON_RIGHT:  return PF_MOUSE_RIGHT;
+        case SDL_BUTTON_X1:     return PF_MOUSE_4;
+        case SDL_BUTTON_X2:     return PF_MOUSE_5;
+        default:                return PF_MOUSE_ANY;
+        }
     default:
         return recompinput::unknown_device_input;
     }

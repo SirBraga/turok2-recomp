@@ -8,6 +8,8 @@
 #include "elements/ui_select.h"
 #include "recompinput/profiles.h"
 #include "recompui/config.h"
+#include "ui_theme.h"
+#include <cstdio>
 
 namespace recompui {
 
@@ -46,11 +48,11 @@ GameInputRow::GameInputRow(
     set_width(100.0f, Unit::Percent);
     // Have to set height here for the scroll buffer to work.
     // Otherwise it fails to calculate the correct size (RmlUI issue)
-    set_height(64.0f);
+    set_height(52.0f);
 
-    set_padding_top(4.0f);
-    set_padding_right(16.0f);
-    set_padding_bottom(4.0f);
+    set_padding_top(2.0f);
+    set_padding_right(12.0f);
+    set_padding_bottom(2.0f);
     set_padding_left(GameInputRow::left_padding);
     set_border_radius(theme::border::radius_sm);
     set_background_color(theme::color::Transparent);
@@ -63,9 +65,10 @@ GameInputRow::GameInputRow(
     set_debug_id("GameInputRow (" + input_ctx.name + ")");
 
     auto label = context.create_element<Label>(this, input_ctx.name, theme::Typography::LabelMD);
-    label->set_flex_grow(2.0f);
+    label->set_flex_grow(0.0f);
     label->set_flex_shrink(1.0f);
-    label->set_flex_basis(300.0f);
+    label->set_flex_basis(160.0f);
+    label->set_min_width(120.0f);
     label->set_height_auto();
     // TODO: whitespace nowrap impl
 
@@ -73,17 +76,18 @@ GameInputRow::GameInputRow(
     {
         bindings_container->set_display(Display::Flex);
         bindings_container->set_position(Position::Relative);
-        bindings_container->set_flex_grow(2.0f);
+        bindings_container->set_flex_grow(1.0f);
         bindings_container->set_flex_shrink(1.0f);
-        bindings_container->set_flex_basis(400.0f);
+        bindings_container->set_flex_basis(240.0f);
+        bindings_container->set_min_width(200.0f);
         bindings_container->set_flex_direction(FlexDirection::Row);
         bindings_container->set_align_items(AlignItems::Center);
         bindings_container->set_justify_content(JustifyContent::SpaceBetween);
         bindings_container->set_width(100.0f, Unit::Percent);
-        bindings_container->set_height(56.0f);
-        bindings_container->set_padding_right(12.0f);
+        bindings_container->set_height(44.0f);
+        bindings_container->set_padding_right(8.0f);
         bindings_container->set_padding_left(4.0f);
-        bindings_container->set_gap(4.0f);
+        bindings_container->set_gap(8.0f);
 
         for (size_t i = 0; i < recompinput::num_bindings_per_input; i++) {
             BindingButton *binding_button = context.create_element<BindingButton>(bindings_container, "");
@@ -97,12 +101,12 @@ GameInputRow::GameInputRow(
     }
 
     if (input_ctx.clearable) {
-        auto clear_button = context.create_element<IconButton>(this, "icons/Trash.svg", ButtonStyle::Danger, IconButtonSize::Large);
+        auto clear_button = context.create_element<IconButton>(this, "icons/Trash.svg", ButtonStyle::Danger, IconButtonSize::Medium);
         clear_button->add_pressed_callback([this, on_clear_or_reset]() {
             on_clear_or_reset(this->input_id, false);
         });
     } else {
-        auto reset_button = context.create_element<IconButton>(this, "icons/Reset.svg", ButtonStyle::Warning, IconButtonSize::Large);
+        auto reset_button = context.create_element<IconButton>(this, "icons/Reset.svg", ButtonStyle::Warning, IconButtonSize::Medium);
         reset_button->add_pressed_callback([this, on_clear_or_reset]() {
             on_clear_or_reset(this->input_id, true);
         });
@@ -344,20 +348,10 @@ void ConfigPageControls::render_body() {
 }
 
 void ConfigPageControls::render_body_mappings() {
-    recompui::ContextId context = get_current_context();
-    body->set_as_navigation_container(NavigationType::Horizontal);
-
-    // left side
-    {
-        render_control_mappings();
-    }
-
-    // right side
-    {
-        body->get_right()->clear_children();
-        description_container = context.create_element<Element>(body->get_right(), 0, "p", true);
-        description_container->set_text("");
-    }
+    body->set_as_navigation_container(NavigationType::Vertical);
+    body->get_right()->clear_children();
+    body->get_right()->set_display(Display::None);
+    render_control_mappings();
 }
 
 void ConfigPageControls::render_body_players() {
@@ -485,7 +479,7 @@ void ConfigPageControls::render_footer() {
     {
         auto footer_right = footer->get_right();
         footer_right->clear_children();
-        auto reset_to_defaults_button = context.create_element<Button>(footer_right, "Reset to defaults", ButtonStyle::Warning);
+        auto reset_to_defaults_button = context.create_element<Button>(footer_right, "Restaurar padrao", ButtonStyle::Warning);
         reset_to_defaults_button->add_pressed_callback([this]() {
             recompinput::profiles::reset_profile_bindings(this->selected_profile_index, this->get_player_input_device());
             this->update_control_mappings();
@@ -522,6 +516,26 @@ void ConfigPageControls::render_control_mappings() {
 
         create_game_input_contexts();
         set_current_profile_index();
+
+        const bool keyboard = get_player_input_device() == recompinput::InputDevice::Keyboard;
+        auto title = context.create_element<Label>(
+            body_left_scroll,
+            keyboard ? "Perfil: Teclado" : "Perfil: Controle",
+            theme::Typography::LabelLG);
+        title->set_margin_top(8.0f);
+        title->set_margin_left(GameInputRow::left_padding);
+        auto hint = context.create_element<Label>(
+            body_left_scroll,
+            "Clique no slot e aperte a tecla. Esc cancela.",
+            theme::Typography::Body);
+        hint->set_color(theme::color::TextDim);
+        hint->set_margin_left(GameInputRow::left_padding);
+        hint->set_margin_bottom(8.0f);
+        description_container = context.create_element<Element>(body_left_scroll, 0, "p", true);
+        description_container->set_text("");
+        description_container->set_color(theme::color::Text);
+        description_container->set_margin_left(GameInputRow::left_padding);
+        description_container->set_margin_bottom(8.0f);
 
         rows_wrappers.clear();
         for (auto *section : game_input_sections.get_all_sections()) {
@@ -641,6 +655,8 @@ recompinput::InputDevice ConfigPageControls::get_player_input_device() {
 void ConfigPageControls::on_bind_click(recompinput::GameInput game_input, int input_index) {
     recompinput::InputDevice device = get_player_input_device();
 
+    std::fprintf(stderr, "[ui] bind start input=%d slot=%d device=%d profile=%d\n",
+        static_cast<int>(game_input), input_index, static_cast<int>(device), selected_profile_index);
     recompinput::binding::start_scanning(this->selected_player, game_input, input_index, device);
     awaiting_binding = true;
     awaiting_binding_for_menu_action_button = get_game_input_is_menu(game_input);

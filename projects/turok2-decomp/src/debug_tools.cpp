@@ -26,6 +26,8 @@
 #include <mach-o/dyld.h>
 #endif
 
+extern "C" int turok2_engine_hz_mode(void);
+
 namespace {
 
 constexpr uint32_t kCinemaObjectPtr = 0x800C1BB0u;
@@ -391,10 +393,9 @@ void refresh_hud() {
     }
     const int cinema = g_cinema.load(std::memory_order_relaxed);
     const std::string note = status_copy();
-    // 120 is the shipping cadence. TUROK2_UNIQUE_60=1 is the opt-out.
-    const char* sixty = std::getenv("TUROK2_UNIQUE_60");
-    const bool show_120 = !(sixty != nullptr && sixty[0] != '\0' &&
-                            std::strcmp(sixty, "0") != 0);
+    const int hz_mode = turok2_engine_hz_mode();
+    const char* hz_label = hz_mode == 0 ? "Original" :
+                           (hz_mode == 1 ? "60Hz" : "120Hz");
     const Turok2AdonCover view = turok2_adon_cover_copy();
     char body[768];
     std::snprintf(
@@ -410,7 +411,7 @@ void refresh_hud() {
         "5  gravar    7  carregar\n"
         "F3 esconder HUD\n"
         "%s",
-        cinema, show_120 ? "120Hz" : "60Hz",
+        cinema, hz_label,
         view.fog_min_in, view.fog_min, view.fog_r, view.fog_g, view.fog_b,
         view.far_clip, view.pitch, view.yaw, view.region, view.vis_bits,
         view.pregion, view.sky_layers, view.sky_alpha, note.c_str());

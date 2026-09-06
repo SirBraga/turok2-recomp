@@ -11,6 +11,7 @@
 #include <memory>
 #include <mutex>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 #if !defined(_WIN32)
@@ -34,12 +35,18 @@
 #include "recompui/renderer.h"
 // Not under include/: recompui exports its src/ tree publicly for these.
 #include "base/ui_launcher.h"
+#include "elements/ui_element.h"
 #include "elements/ui_image.h"
+#include "elements/ui_label.h"
 #include "util/file.h"
 #include "recompinput/recompinput.h"
 #include "recompinput/profiles.h"
 #include "recompinput/input_mapping.h"
 #include "recompinput/input_state.h"
+#include "recompinput/input_binding.h"
+#include "recompinput/input_events.h"
+#include "recompinput/input_types.h"
+#include "recompinput/players.h"
 #include "ultramodern/input.hpp"
 #include "ultramodern/ultramodern.hpp"
 #include "crash_diagnostics.h"
@@ -50,8 +57,8 @@ gpr get_entrypoint_address();
 void turok2_on_init(uint8_t*, recomp_context*);
 void turok2_on_thread_create(uint8_t*, recomp_context*);
 void register_turok2_sections();
-extern "C" void turok2_set_camera_scales(float fov_scale, float far_scale, float fog_scale);
-extern "C" void turok2_set_hud_scale(float hud_scale);
+extern "C" void turok2_set_camera_scales(float fov_scale);
+extern "C" void turok2_set_engine_hz(int mode);
 extern RspUcodeFunc aspMain;
 
 void enable_texture_pack(recomp::mods::ModContext& context, const recomp::mods::ModHandle& mod) {
@@ -80,24 +87,114 @@ void register_turok2_texture_pack_content() {
         "rtz", std::vector{texture_pack_content_type_id}, false);
 }
 
+static recompui::Color rgba(uint8_t r, uint8_t g, uint8_t b, uint8_t a = 255) {
+    return recompui::Color{r, g, b, a};
+}
+
+static recompui::Color with_a(recompui::Color c, uint8_t a) {
+    c.a = a;
+    return c;
+}
+
+void apply_turok2_ui_theme() {
+    using recompui::theme::color;
+    using recompui::theme::Typography;
+    const recompui::Color paper = rgba(10, 8, 6);
+    const recompui::Color ink = rgba(236, 228, 214);
+    const recompui::Color rust = rgba(196, 82, 36);
+    const recompui::Color ochre = rgba(201, 160, 72);
+    const recompui::Color wash = rgba(201, 140, 72);
+
+    recompui::theme::set_theme_color(color::Background1, paper);
+    recompui::theme::set_theme_color(color::Background2, rgba(18, 14, 11));
+    recompui::theme::set_theme_color(color::Background3, rgba(28, 22, 17));
+    recompui::theme::set_theme_color(color::BGOverlay, with_a(wash, 28));
+    recompui::theme::set_theme_color(color::ModalOverlay, rgba(8, 6, 4, 235));
+    recompui::theme::set_theme_color(color::BGShadow, rgba(0, 0, 0, 96));
+    recompui::theme::set_theme_color(color::BGShadow2, rgba(8, 6, 4, 184));
+
+    recompui::theme::set_theme_color(color::Text, ink);
+    recompui::theme::set_theme_color(color::TextActive, rgba(245, 238, 226));
+    recompui::theme::set_theme_color(color::TextDim, rgba(196, 184, 166));
+    recompui::theme::set_theme_color(color::TextInactive, rgba(236, 228, 214, 153));
+    recompui::theme::set_theme_color(color::TextA5, with_a(ink, 13));
+    recompui::theme::set_theme_color(color::TextA20, with_a(ink, 51));
+    recompui::theme::set_theme_color(color::TextA30, with_a(ink, 77));
+    recompui::theme::set_theme_color(color::TextA50, with_a(ink, 128));
+    recompui::theme::set_theme_color(color::TextA80, with_a(ink, 204));
+
+    recompui::theme::set_theme_color(color::Primary, rust);
+    recompui::theme::set_theme_color(color::PrimaryL, rgba(232, 168, 112));
+    recompui::theme::set_theme_color(color::PrimaryD, rgba(122, 42, 18));
+    recompui::theme::set_theme_color(color::PrimaryA5, with_a(rust, 13));
+    recompui::theme::set_theme_color(color::PrimaryA20, with_a(rust, 51));
+    recompui::theme::set_theme_color(color::PrimaryA30, with_a(rust, 77));
+    recompui::theme::set_theme_color(color::PrimaryA50, with_a(rust, 128));
+    recompui::theme::set_theme_color(color::PrimaryA80, with_a(rust, 204));
+
+    recompui::theme::set_theme_color(color::Secondary, ochre);
+    recompui::theme::set_theme_color(color::SecondaryL, rgba(232, 204, 140));
+    recompui::theme::set_theme_color(color::SecondaryD, rgba(140, 104, 32));
+    recompui::theme::set_theme_color(color::SecondaryA5, with_a(ochre, 13));
+    recompui::theme::set_theme_color(color::SecondaryA20, with_a(ochre, 51));
+    recompui::theme::set_theme_color(color::SecondaryA30, with_a(ochre, 77));
+    recompui::theme::set_theme_color(color::SecondaryA50, with_a(ochre, 128));
+    recompui::theme::set_theme_color(color::SecondaryA80, with_a(ochre, 204));
+
+    recompui::theme::set_theme_color(color::A, rust);
+    recompui::theme::set_theme_color(color::AL, rgba(232, 168, 112));
+    recompui::theme::set_theme_color(color::AD, rgba(122, 42, 18));
+    recompui::theme::set_theme_color(color::AA5, with_a(rust, 13));
+    recompui::theme::set_theme_color(color::AA20, with_a(rust, 51));
+    recompui::theme::set_theme_color(color::AA30, with_a(rust, 77));
+    recompui::theme::set_theme_color(color::AA50, with_a(rust, 128));
+    recompui::theme::set_theme_color(color::AA80, with_a(rust, 204));
+
+    recompui::theme::set_theme_color(color::Elevated, with_a(wash, 28));
+    recompui::theme::set_theme_color(color::ElevatedSoft, with_a(wash, 14));
+    recompui::theme::set_theme_color(color::ElevatedBorder, with_a(wash, 180));
+    recompui::theme::set_theme_color(color::ElevatedBorderHard, wash);
+
+    recompui::theme::set_border_radius_sm(4.0f);
+    recompui::theme::set_border_radius_md(6.0f);
+    recompui::theme::set_border_radius_lg(8.0f);
+
+    recompui::theme::set_typography_preset(Typography::Header1, 44.0f, -0.02f, 700);
+    recompui::theme::set_typography_preset(Typography::Header2, 32.0f, -0.01f, 700);
+    recompui::theme::set_typography_preset(Typography::Header3, 24.0f, 0.0f, 700);
+    recompui::theme::set_typography_preset(Typography::LabelLG, 22.0f, 0.02f, 600);
+    recompui::theme::set_typography_preset(Typography::LabelMD, 17.0f, 0.01f, 600);
+    recompui::theme::set_typography_preset(Typography::LabelSM, 13.0f, 0.08f, 600);
+    recompui::theme::set_typography_preset(Typography::LabelXS, 13.0f, 0.04f, 400);
+    recompui::theme::set_typography_preset(Typography::Body, 16.0f, 0.0f, 400);
+}
+
 void register_turok2_default_keyboard() {
     using recompinput::GameInput;
     using recompinput::InputField;
-    // Keep WASD as CContState movement, not N64 stick, to avoid double apply.
-    recompinput::set_default_mapping_for_keyboard(GameInput::A, {});
+
+    recompinput::set_default_mapping_for_keyboard(
+        GameInput::A, {InputField::keyboard(SDL_SCANCODE_TAB)});
     recompinput::set_default_mapping_for_keyboard(
         GameInput::B, {InputField::keyboard(SDL_SCANCODE_LCTRL),
-                       InputField::keyboard(SDL_SCANCODE_F)});
-    recompinput::set_default_mapping_for_keyboard(GameInput::Z, {});
+                       InputField::mouse(SDL_BUTTON_MIDDLE)});
     recompinput::set_default_mapping_for_keyboard(
-        GameInput::L, {InputField::keyboard(SDL_SCANCODE_R)});
-    recompinput::set_default_mapping_for_keyboard(GameInput::R, {});
+        GameInput::Z, {InputField::mouse(SDL_BUTTON_LEFT)});
+    recompinput::set_default_mapping_for_keyboard(
+        GameInput::L, {InputField::mouse(SDL_BUTTON_RIGHT),
+                       InputField::keyboard(SDL_SCANCODE_R)});
+    recompinput::set_default_mapping_for_keyboard(
+        GameInput::R, {InputField::keyboard(SDL_SCANCODE_SPACE)});
     recompinput::set_default_mapping_for_keyboard(
         GameInput::START, {InputField::keyboard(SDL_SCANCODE_RETURN)});
-    recompinput::set_default_mapping_for_keyboard(GameInput::C_LEFT, {});
-    recompinput::set_default_mapping_for_keyboard(GameInput::C_RIGHT, {});
-    recompinput::set_default_mapping_for_keyboard(GameInput::C_UP, {});
-    recompinput::set_default_mapping_for_keyboard(GameInput::C_DOWN, {});
+    recompinput::set_default_mapping_for_keyboard(
+        GameInput::C_LEFT, {InputField::keyboard(SDL_SCANCODE_1)});
+    recompinput::set_default_mapping_for_keyboard(
+        GameInput::C_RIGHT, {InputField::keyboard(SDL_SCANCODE_3)});
+    recompinput::set_default_mapping_for_keyboard(
+        GameInput::C_UP, {InputField::keyboard(SDL_SCANCODE_4)});
+    recompinput::set_default_mapping_for_keyboard(
+        GameInput::C_DOWN, {InputField::keyboard(SDL_SCANCODE_2)});
     recompinput::set_default_mapping_for_keyboard(
         GameInput::DPAD_LEFT, {InputField::keyboard(SDL_SCANCODE_LEFT)});
     recompinput::set_default_mapping_for_keyboard(
@@ -106,52 +203,96 @@ void register_turok2_default_keyboard() {
         GameInput::DPAD_UP, {InputField::keyboard(SDL_SCANCODE_UP)});
     recompinput::set_default_mapping_for_keyboard(
         GameInput::DPAD_DOWN, {InputField::keyboard(SDL_SCANCODE_DOWN)});
-    recompinput::set_default_mapping_for_keyboard(GameInput::X_AXIS_NEG, {});
-    recompinput::set_default_mapping_for_keyboard(GameInput::X_AXIS_POS, {});
-    recompinput::set_default_mapping_for_keyboard(GameInput::Y_AXIS_POS, {});
-    recompinput::set_default_mapping_for_keyboard(GameInput::Y_AXIS_NEG, {});
+    recompinput::set_default_mapping_for_keyboard(
+        GameInput::X_AXIS_NEG, {InputField::keyboard(SDL_SCANCODE_A)});
+    recompinput::set_default_mapping_for_keyboard(
+        GameInput::X_AXIS_POS, {InputField::keyboard(SDL_SCANCODE_D)});
+    recompinput::set_default_mapping_for_keyboard(
+        GameInput::Y_AXIS_POS, {InputField::keyboard(SDL_SCANCODE_W)});
+    recompinput::set_default_mapping_for_keyboard(
+        GameInput::Y_AXIS_NEG, {InputField::keyboard(SDL_SCANCODE_S)});
 
     recompinput::set_default_mapping_for_controller(
-        GameInput::R, {InputField::controller_digital(SDL_CONTROLLER_BUTTON_RIGHTSHOULDER)});
+        GameInput::A, {InputField::controller_digital(SDL_CONTROLLER_BUTTON_B)});
+    recompinput::set_default_mapping_for_controller(
+        GameInput::B, {InputField::controller_digital(SDL_CONTROLLER_BUTTON_X)});
     recompinput::set_default_mapping_for_controller(
         GameInput::Z,
-        {InputField::controller_analog(SDL_CONTROLLER_AXIS_TRIGGERLEFT, true),
-         InputField::controller_analog(SDL_CONTROLLER_AXIS_TRIGGERRIGHT, true)});
+        {InputField::controller_analog(SDL_CONTROLLER_AXIS_TRIGGERLEFT, true)});
+    recompinput::set_default_mapping_for_controller(
+        GameInput::L,
+        {InputField::controller_analog(SDL_CONTROLLER_AXIS_TRIGGERRIGHT, true),
+         InputField::controller_digital(SDL_CONTROLLER_BUTTON_LEFTSHOULDER)});
+    recompinput::set_default_mapping_for_controller(
+        GameInput::R, {InputField::controller_digital(SDL_CONTROLLER_BUTTON_A)});
+    recompinput::set_default_mapping_for_controller(
+        GameInput::START, {InputField::controller_digital(SDL_CONTROLLER_BUTTON_START)});
+    recompinput::set_default_mapping_for_controller(
+        GameInput::C_UP, {InputField::controller_digital(SDL_CONTROLLER_BUTTON_Y)});
     recompinput::set_default_mapping_for_controller(
         GameInput::C_DOWN,
-        {InputField::controller_analog(SDL_CONTROLLER_AXIS_RIGHTY, true)});
+        {InputField::controller_digital(SDL_CONTROLLER_BUTTON_RIGHTSHOULDER)});
+    recompinput::set_default_mapping_for_controller(
+        GameInput::C_LEFT, {InputField::controller_digital(SDL_CONTROLLER_BUTTON_DPAD_LEFT)});
+    recompinput::set_default_mapping_for_controller(
+        GameInput::C_RIGHT, {InputField::controller_digital(SDL_CONTROLLER_BUTTON_DPAD_RIGHT)});
 }
 
 void register_turok2_game_inputs() {
     using recompinput::GameInput;
     recompui::config::controls::add_game_input(
-        "A", "Weapon cycle / menu confirm", GameInput::A, true);
+        "Frente", "Andar para frente.", GameInput::Y_AXIS_POS, true);
     recompui::config::controls::add_game_input(
-        "B", "Crouch", GameInput::B, true);
+        "Tras", "Andar para tras.", GameInput::Y_AXIS_NEG, true);
     recompui::config::controls::add_game_input(
-        "Z", "Fire / attack", GameInput::Z, true);
+        "Esquerda", "Strafe para a esquerda.", GameInput::X_AXIS_NEG, true);
     recompui::config::controls::add_game_input(
-        "L", "Aim / scope", GameInput::L, true);
+        "Direita", "Strafe para a direita.", GameInput::X_AXIS_POS, true);
     recompui::config::controls::add_game_input(
-        "R", "Jump", GameInput::R, true);
+        "Pular", "Pulo (botao R do N64).", GameInput::R, true);
     recompui::config::controls::add_game_input(
-        "Start", "Pause / start", GameInput::START, true);
+        "Atirar", "Tiro / golpe. Clique no slot e aperte o botao do mouse.", GameInput::Z, true);
     recompui::config::controls::add_game_input(
-        "C Up", "C-Up (items / classic look)", GameInput::C_UP, true);
+        "Mira", "Mira / scope (botao L do N64).", GameInput::L, true);
     recompui::config::controls::add_game_input(
-        "C Down", "C-Down (items / classic look)", GameInput::C_DOWN, true);
+        "Agachar", "Agachar (botao B do N64).", GameInput::B, true);
     recompui::config::controls::add_game_input(
-        "C Left", "C-Left (items / classic look)", GameInput::C_LEFT, true);
+        "Arma", "Ciclo de arma / confirmar no menu nativo (botao A).", GameInput::A, true);
     recompui::config::controls::add_game_input(
-        "C Right", "C-Right (items / classic look)", GameInput::C_RIGHT, true);
+        "Pause", "Pause / Start.", GameInput::START, true);
     recompui::config::controls::add_game_input(
-        "D-Pad Up", "D-pad up", GameInput::DPAD_UP, true);
+        "Item cima", "C-Up: item / camera classica.", GameInput::C_UP, true);
     recompui::config::controls::add_game_input(
-        "D-Pad Down", "D-pad down", GameInput::DPAD_DOWN, true);
+        "Item baixo", "C-Down: item / camera classica.", GameInput::C_DOWN, true);
     recompui::config::controls::add_game_input(
-        "D-Pad Left", "D-pad left", GameInput::DPAD_LEFT, true);
+        "Item esquerda", "C-Left: item / camera classica.", GameInput::C_LEFT, true);
     recompui::config::controls::add_game_input(
-        "D-Pad Right", "D-pad right", GameInput::DPAD_RIGHT, true);
+        "Item direita", "C-Right: item / camera classica.", GameInput::C_RIGHT, true);
+    recompui::config::controls::add_game_input(
+        "D-Pad cima", "D-pad cima.", GameInput::DPAD_UP, true);
+    recompui::config::controls::add_game_input(
+        "D-Pad baixo", "D-pad baixo.", GameInput::DPAD_DOWN, true);
+    recompui::config::controls::add_game_input(
+        "D-Pad esquerda", "D-pad esquerda.", GameInput::DPAD_LEFT, true);
+    recompui::config::controls::add_game_input(
+        "D-Pad direita", "D-pad direita.", GameInput::DPAD_RIGHT, true);
+}
+
+static bool keyboard_binding_empty(recompinput::GameInput input) {
+    const int kb = recompinput::profiles::get_sp_keyboard_profile_index();
+    return recompinput::profiles::get_input_binding(kb, input, 0).is_empty() &&
+           recompinput::profiles::get_input_binding(kb, input, 1).is_empty();
+}
+
+void turok2_repair_hollow_keyboard_profile() {
+    if (keyboard_binding_empty(recompinput::GameInput::Z) &&
+        keyboard_binding_empty(recompinput::GameInput::R) &&
+        keyboard_binding_empty(recompinput::GameInput::X_AXIS_POS)) {
+        recompinput::profiles::reset_profile_bindings(
+            recompinput::profiles::get_sp_keyboard_profile_index(),
+            recompinput::InputDevice::Keyboard);
+        std::fprintf(stderr, "[ui] teclado vazio restaurado para o padrao Turok 2\n");
+    }
 }
 
 void register_recomp_controller(SDL_GameController* controller) {
@@ -530,11 +671,9 @@ void set_mouse_grabbed(bool grabbed) {
 static void push_camera_scales_from_menu() {
     try {
         turok2_set_camera_scales(
-            static_cast<float>(recompui::config::graphics::get_fov_scale()),
-            static_cast<float>(recompui::config::graphics::get_far_scale()),
-            static_cast<float>(recompui::config::graphics::get_fog_scale()));
-        turok2_set_hud_scale(
-            static_cast<float>(recompui::config::graphics::get_hud_scale()));
+            static_cast<float>(recompui::config::graphics::get_fov_scale()));
+        turok2_set_engine_hz(
+            static_cast<int>(recompui::config::graphics::get_engine_hz()));
     } catch (const std::exception&) {
     }
 }
@@ -559,11 +698,18 @@ void update_gfx(void*) {
     const bool menu_open = recomp_config_open() ||
                            recompui::is_context_capturing_input() ||
                            inspector_open;
+    if (menu_open && g_mouse_grabbed.load(std::memory_order_relaxed)) {
+        set_mouse_grabbed(false);
+    }
     SDL_Event event{};
     while (SDL_PollEvent(&event)) {
-        // The config modal opens from this queue (Esc in draw_hook). Without
-        // this, Turok swallowed every SDL event and the Graphics tab never appeared.
-        recompui::queue_event(event);
+        // Official bind + RmlUi queue. This port owns SDL_PollEvent, so the
+        // frontend handle_events() never runs; call the filter here instead
+        // of a second queue_event (that would double-fire Accept / Enter).
+        recompinput::sdl_event_filter(nullptr, &event);
+        if (recompinput::binding::is_binding()) {
+            continue;
+        }
 
         if (event.type == SDL_QUIT) {
             ultramodern::quit();
@@ -638,12 +784,6 @@ void update_gfx(void*) {
                         }
                     } catch (const std::exception&) {
                     }
-                } else if (event.key.keysym.scancode == SDL_SCANCODE_RETURN &&
-                           g_mouse_grabbed.load(std::memory_order_relaxed) &&
-                           event.key.repeat == 0) {
-                    // Enter opens the pause/menu layer. Release relative mode so
-                    // WASD navigates menus until the game view is clicked again.
-                    set_mouse_grabbed(false);
                 } else if (event.key.repeat == 0 &&
                            (event.key.keysym.scancode == SDL_SCANCODE_F5 ||
                             event.key.keysym.scancode == SDL_SCANCODE_5 ||
@@ -705,6 +845,9 @@ void update_gfx(void*) {
                 break;
         }
     }
+    // handle_events() clears this after each poll. We own the poll, so a
+    // cancelled bind used to leave skip_events stuck and the UI deaf.
+    recompinput::binding::stop_skipping_events();
 
     static bool announced_game_start = false;
     if (!announced_game_start && ultramodern::is_game_started()) {
@@ -945,83 +1088,11 @@ void sample_input() {
 
     const Uint8* keys = SDL_GetKeyboardState(nullptr);
     if (keys != nullptr) {
-        struct KeyMap {
-            SDL_Scancode code;
-            uint16_t button;
-        };
-        // Deliberately small keyboard map. The old diagnostic aliases (X/Z/C,
-        // IJKL and 1-4) were useful during bring-up, but made ordinary keys fire
-        // hidden N64 inputs during play.
-        static const KeyMap key_map[] = {
-            { SDL_SCANCODE_RETURN, N64_START },
-            { SDL_SCANCODE_LCTRL,  N64_B },
-            { SDL_SCANCODE_F,      N64_B },
-            { SDL_SCANCODE_R,      N64_L },
-            { SDL_SCANCODE_UP,     N64_D_UP },
-            { SDL_SCANCODE_DOWN,   N64_D_DOWN },
-            { SDL_SCANCODE_LEFT,   N64_D_LEFT },
-            { SDL_SCANCODE_RIGHT,  N64_D_RIGHT },
-        };
-        for (const KeyMap& entry : key_map) {
-            if (keys[entry.code] != 0) {
-                pressed |= entry.button;
-            }
-        }
-
-        // Relative mode means gameplay; a released cursor means a front-end or
-        // pause menu, where WASD should behave like the D-pad.
-        float strafe = 0.0f;
-        float forward = 0.0f;
-        const bool mouse_grabbed = g_mouse_grabbed.load(std::memory_order_relaxed);
-        if (mouse_grabbed) {
-            // In Turok 2's authored mapping R is jump. A is weapon selection,
-            // which is why the earlier nominal N64_A binding changed weapons.
-            if (keys[SDL_SCANCODE_SPACE] != 0) { pressed |= N64_R; }
-            if (keys[SDL_SCANCODE_A] != 0) { strafe -= 1.0f; }
-            if (keys[SDL_SCANCODE_D] != 0) { strafe += 1.0f; }
-            if (keys[SDL_SCANCODE_W] != 0) { forward += 1.0f; }
-            if (keys[SDL_SCANCODE_S] != 0) { forward -= 1.0f; }
-        } else {
-            // Preserve the conventional A/confirm action while navigating a
-            // menu with the mouse released.
-            if (keys[SDL_SCANCODE_SPACE] != 0) { pressed |= N64_A; }
-            if (keys[SDL_SCANCODE_A] != 0) { pressed |= N64_D_LEFT; }
-            if (keys[SDL_SCANCODE_D] != 0) { pressed |= N64_D_RIGHT; }
-            if (keys[SDL_SCANCODE_W] != 0) { pressed |= N64_D_UP; }
-            if (keys[SDL_SCANCODE_S] != 0) { pressed |= N64_D_DOWN; }
-        }
-        if (strafe != 0.0f && forward != 0.0f) {
-            // Match the circular range of a real N64 stick. Without this, a
-            // full (1,1) square input can be rejected or axis-prioritized by
-            // movement code that expects magnitude <= 1.
-            constexpr float diagonal = 0.70710678f;
-            strafe *= diagonal;
-            forward *= diagonal;
-        }
-        g_keyboard_strafe.store(strafe, std::memory_order_relaxed);
-        g_keyboard_forward.store(forward, std::memory_order_relaxed);
         g_weapon_previous.store(keys[SDL_SCANCODE_Q] != 0, std::memory_order_relaxed);
         g_weapon_next.store(keys[SDL_SCANCODE_E] != 0, std::memory_order_relaxed);
     } else {
-        g_keyboard_strafe.store(0.0f, std::memory_order_relaxed);
-        g_keyboard_forward.store(0.0f, std::memory_order_relaxed);
         g_weapon_previous.store(false, std::memory_order_relaxed);
         g_weapon_next.store(false, std::memory_order_relaxed);
-    }
-
-    // Mouse buttons. The wheel is intentionally not translated to C-Buttons:
-    // those mean camera or strafe depending on the in-game control style.
-    if (g_mouse_grabbed.load(std::memory_order_relaxed)) {
-        const Uint32 mouse_buttons = SDL_GetMouseState(nullptr, nullptr);
-        if (mouse_buttons & SDL_BUTTON(SDL_BUTTON_LEFT)) {
-            pressed |= N64_Z; // Fire / attack (warblade, guns, etc.)
-        }
-        if (mouse_buttons & SDL_BUTTON(SDL_BUTTON_RIGHT)) {
-            pressed |= N64_L; // Aim / scope (sniper mode)
-        }
-        if (mouse_buttons & SDL_BUTTON(SDL_BUTTON_MIDDLE)) {
-            pressed |= N64_B; // Crouch
-        }
     }
 
     recompinput::poll_inputs();
@@ -1066,6 +1137,42 @@ void sample_input() {
     float n64_y = 0.0f;
     recompinput::profiles::get_n64_input(0, &n64_buttons, &n64_x, &n64_y);
     pressed |= n64_buttons;
+
+    const int kb_profile = recompinput::profiles::get_sp_keyboard_profile_index();
+    auto kb_axis = [kb_profile](recompinput::GameInput pos, recompinput::GameInput neg) {
+        float plus = 0.0f;
+        float minus = 0.0f;
+        for (size_t i = 0; i < recompinput::num_bindings_per_input; i++) {
+            plus += recompinput::get_input_analog(
+                0, recompinput::profiles::get_input_binding(kb_profile, pos, i));
+            minus += recompinput::get_input_analog(
+                0, recompinput::profiles::get_input_binding(kb_profile, neg, i));
+        }
+        return std::clamp(plus, 0.0f, 1.0f) - std::clamp(minus, 0.0f, 1.0f);
+    };
+    float kb_strafe = kb_axis(recompinput::GameInput::X_AXIS_POS, recompinput::GameInput::X_AXIS_NEG);
+    float kb_forward = kb_axis(recompinput::GameInput::Y_AXIS_POS, recompinput::GameInput::Y_AXIS_NEG);
+    n64_x -= kb_strafe;
+    n64_y -= kb_forward;
+
+    const bool mouse_grabbed = g_mouse_grabbed.load(std::memory_order_relaxed);
+    if (mouse_grabbed) {
+        if (kb_strafe != 0.0f && kb_forward != 0.0f) {
+            constexpr float diagonal = 0.70710678f;
+            kb_strafe *= diagonal;
+            kb_forward *= diagonal;
+        }
+        g_keyboard_strafe.store(kb_strafe, std::memory_order_relaxed);
+        g_keyboard_forward.store(kb_forward, std::memory_order_relaxed);
+    } else {
+        g_keyboard_strafe.store(0.0f, std::memory_order_relaxed);
+        g_keyboard_forward.store(0.0f, std::memory_order_relaxed);
+        if (kb_strafe < -0.4f) { pressed |= N64_D_LEFT; }
+        if (kb_strafe > 0.4f)  { pressed |= N64_D_RIGHT; }
+        if (kb_forward > 0.4f) { pressed |= N64_D_UP; }
+        if (kb_forward < -0.4f){ pressed |= N64_D_DOWN; }
+    }
+
     if (n64_x != 0.0f || n64_y != 0.0f) {
         stick_x = n64_x;
         stick_y = n64_y;
@@ -1329,26 +1436,20 @@ void turok2_on_launcher_init(recompui::LauncherMenu* menu) {
         entry.mod_game_id,
         entry.display_name,
         entry.thumbnail_bytes,
-        recompui::GameOptionsMenuLayout::Center);
+        recompui::GameOptionsMenuLayout::Left);
 
-    // "Carregar ROM" until one is stored, then "Jogar" — the option swaps
-    // itself, so a first run and every later run both read correctly.
-    options->add_start_game_or_load_rom_option("Carregar ROM", "Jogar");
+    recompui::GameOption* play = options->add_start_game_or_load_rom_option(
+        "Carregar ROM", "Jogar");
+    play->set_primary_action(true);
     options->add_setup_controls_option("Controles");
     options->add_settings_option("Opcoes");
     options->add_mods_option("Mods");
     options->add_exit_option("Sair");
 
-    // The key art already carries the logo, so the framework's text title
-    // would sit on top of it.
     menu->remove_default_title();
 
     recompui::Element* background = menu->get_background_wrapper();
     recompui::ContextId context = recompui::get_current_context();
-    // The RmlUi render interface never touches the filesystem: LoadTexture only
-    // looks the src up in a registry of images supplied as bytes, and silently
-    // hands back a transparent 1x1 when it misses. So the file has to be read
-    // here and registered under the name used as the src.
     static constexpr const char* kArtSrc = "turok2-launcher-art";
     static bool art_registered = false;
     if (!art_registered) {
@@ -1377,9 +1478,66 @@ void turok2_on_launcher_init(recompui::LauncherMenu* menu) {
     art->set_width(100.0f, recompui::Unit::Percent);
     art->set_height(100.0f, recompui::Unit::Percent);
 
-    // Drop the options below the logo instead of over it.
+    recompui::Element* scrim = context.create_element<recompui::Element>(background);
+    scrim->set_position(recompui::Position::Absolute);
+    scrim->set_top(0);
+    scrim->set_left(0);
+    scrim->set_bottom(0);
+    scrim->set_width(36.0f, recompui::Unit::Percent);
+    scrim->set_background_color(rgba(8, 6, 4, 230));
+
     recompui::Element* menu_container = menu->get_menu_container();
-    menu_container->set_top(62.0f, recompui::Unit::Percent);
+    menu_container->set_top(0);
+    menu_container->set_left(0);
+    menu_container->set_right(0);
+    menu_container->set_bottom(0);
+
+    recompui::Element* rail = context.create_element<recompui::Element>(menu_container);
+    rail->set_position(recompui::Position::Absolute);
+    rail->set_left(48.0f);
+    rail->set_bottom(56.0f);
+    rail->set_width(400.0f);
+    rail->set_display(recompui::Display::Flex);
+    rail->set_flex_direction(recompui::FlexDirection::Column);
+    rail->set_align_items(recompui::AlignItems::FlexStart);
+    rail->set_gap(28.0f);
+
+    recompui::Element* title_block = context.create_element<recompui::Element>(rail);
+    title_block->set_display(recompui::Display::Flex);
+    title_block->set_flex_direction(recompui::FlexDirection::Column);
+    title_block->set_align_items(recompui::AlignItems::FlexStart);
+    title_block->set_gap(8.0f);
+    title_block->set_width(100.0f, recompui::Unit::Percent);
+
+    recompui::Label* title = context.create_element<recompui::Label>(
+        title_block, "TUROK 2", recompui::theme::Typography::Header1);
+    title->set_color(recompui::theme::color::Text);
+
+    recompui::Element* rule = context.create_element<recompui::Element>(title_block);
+    rule->set_width(72.0f);
+    rule->set_height(3.0f);
+    rule->set_background_color(recompui::theme::color::Primary);
+
+    recompui::Label* subtitle = context.create_element<recompui::Label>(
+        title_block, "Seeds of Evil  ·  Recompiled",
+        recompui::theme::Typography::LabelMD);
+    subtitle->set_color(recompui::theme::color::Primary);
+
+    std::u8string rom_id = entry.game_id;
+    const bool rom_ready = recomp::is_rom_valid(rom_id);
+    recompui::Label* status = context.create_element<recompui::Label>(
+        title_block,
+        rom_ready ? "ROM NTSC-U pronta" : "Precisa da ROM NTSC-U de Turok 2",
+        recompui::theme::Typography::Body);
+    status->set_color(recompui::theme::color::TextDim);
+
+    options->set_parent(rail);
+    options->set_position(recompui::Position::Relative);
+    options->set_left(0);
+    options->set_bottom(0);
+    options->set_width(100.0f, recompui::Unit::Percent);
+    options->set_align_items(recompui::AlignItems::Stretch);
+    options->set_gap(4.0f);
 }
 }
 
@@ -1403,6 +1561,7 @@ int main(int argc, char** argv) {
 
     recompui::programconfig::set_program_name("Turok 2: Recompiled");
     recompui::programconfig::set_program_id(u8"turok2-recompiled");
+    apply_turok2_ui_theme();
 
     // Standard per-user application folder, with portable.txt support, instead
     // of the bring-up path under build-native. Saves, settings and the stored
@@ -1412,19 +1571,23 @@ int main(int argc, char** argv) {
     std::filesystem::create_directories(config_path);
     recomp::register_config_path(config_path);
     recompui::register_primary_font("LatoLatin-Regular.ttf", "LatoLatin");
+    // Turok 2 is one player here. Without this the controls page shows the
+    // four-player assignment cards, and every Edit Profile stays disabled.
+    recompinput::players::set_single_player_mode(true);
     register_turok2_default_keyboard();
     recompui::config::create_general_tab({
         .has_mouse_sensitivity = true,
         .has_analog_look = true,
         .mouse_sensitivity_default = 50.0,
         .joystick_deadzone_default = 20.0,
-    });
-    recompui::config::create_controls_tab();
+    }, "Geral");
+    recompui::config::create_controls_tab("Controles");
     register_turok2_game_inputs();
-    recompui::config::create_graphics_tab();
-    recompui::config::create_sound_tab();
-    recompui::config::create_mods_tab();
+    recompui::config::create_graphics_tab("Video");
+    recompui::config::create_sound_tab("Audio");
+    recompui::config::create_mods_tab("Mods");
     recompui::config::finalize();
+    turok2_repair_hollow_keyboard_profile();
     recompui::register_present_overlay(&turok2_debug_present);
 
     open_first_game_controller();

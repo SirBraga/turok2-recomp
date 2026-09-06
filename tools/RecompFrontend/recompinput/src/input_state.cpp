@@ -230,8 +230,10 @@ float recompinput::get_input_analog(int controller_num, const InputField& field)
     case InputType::ControllerAnalog:
         return controller_axis_state(controller_num, field.input_id, true);
     case InputType::Mouse:
-        // TODO mouse support
-        return 0.0f;
+        if (!SDL_GetRelativeMouseMode()) {
+            return 0.0f;
+        }
+        return (SDL_GetMouseState(nullptr, nullptr) & SDL_BUTTON(field.input_id)) ? 1.0f : 0.0f;
     case InputType::None:
         return false;
     }
@@ -261,8 +263,10 @@ bool recompinput::get_input_digital(int controller_num, const InputField& field)
         // TODO adjustable threshold
         return controller_axis_state(controller_num, field.input_id, true) >= recompinput::axis_digital_threshold;
     case InputType::Mouse:
-        // TODO mouse support
-        return false;
+        if (!SDL_GetRelativeMouseMode()) {
+            return false;
+        }
+        return (SDL_GetMouseState(nullptr, nullptr) & SDL_BUTTON(field.input_id)) != 0;
     case InputType::None:
         return false;
     }

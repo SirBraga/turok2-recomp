@@ -1,29 +1,33 @@
 name: Windows
 
-# Produces a ready-to-run Windows build of Turok 2: Recompiled.
-# Run it from the Actions tab (workflow_dispatch) or let it fire on a push.
+# Ready-to-run Windows x64 build of Turok 2: Recompiled.
+# Actions tab → Run workflow, or any push / PR to master.
 on:
   push:
     branches: [main, master]
     paths-ignore:
       - '**.md'
   pull_request:
+    branches: [main, master]
   workflow_dispatch:
+
+concurrency:
+  group: windows-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   build:
     runs-on: windows-latest
-    # The recompiled C is roughly a thousand translation units, so a cold MSVC
-    # build is long. The default 360 minute cap is not enough headroom to rely on.
+    # ~1000 generated C files; a cold MSVC run needs more than the default hour.
     timeout-minutes: 300
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          # The dependencies under tools/ are vendored directly rather than
-          # registered as submodules, because the port carries local changes to
-          # N64ModernRuntime and RecompFrontend that upstream does not have.
           fetch-depth: 1
 
       - name: Set up MSVC
@@ -34,12 +38,11 @@ jobs:
       - name: Set up CMake and Ninja
         uses: lukka/get-cmake@latest
 
-      # Speeds up repeat runs a lot; the first run populates it.
       - name: Compiler cache
         uses: hendrikmuhs/ccache-action@v1
         with:
           variant: sccache
-          key: turok2-windows
+          key: turok2-windows-x64
 
       - name: Configure
         run: >
@@ -50,24 +53,38 @@ jobs:
           -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
 
       - name: Build
-        run: cmake --build build-win --target Turok2Recompiled
+        run: cmake --build build-win --target Turok2Recompiled --config Release
 
       - name: Stage release folder
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
+          $exe = Get-ChildItem -Path build-win -Recurse -Filter Turok2Recompiled.exe |
+            Where-Object { $_.FullName -notmatch '\\CMakeFiles\\' } |
+            Select-Object -First 1
+          if (-not $exe) { throw "Turok2Recompiled.exe was not produced" }
+
+          $src = $exe.DirectoryName
           $dist = "dist/Turok2Recompiled"
           New-Item -ItemType Directory -Force -Path $dist | Out-Null
-          Copy-Item "build-win/Turok2Recompiled.exe" $dist
-          Copy-Item "build-win/*.dll" $dist -ErrorAction SilentlyContinue
-          Copy-Item "build-win/assets" $dist -Recurse
-          # The ROM is not shipped. The launcher asks for it on first run and
-          # stores it in the per-user application folder from then on.
+          Copy-Item "$src/Turok2Recompiled.exe" $dist
+          Get-ChildItem $src -Filter *.dll | Copy-Item -Destination $dist
+          if (Test-Path "$src/assets") {
+            Copy-Item "$src/assets" $dist -Recurse
+          }
+          $mods = Join-Path (Resolve-Path build-win) "runtime-data/mods"
+          if (Test-Path $mods) {
+            New-Item -ItemType Directory -Force -Path "$dist/runtime-data/mods" | Out-Null
+            Copy-Item $mods "$dist/runtime-data" -Recurse -Force
+          }
           @"
           Turok 2: Recompiled
 
-          Run Turok2Recompiled.exe and pick your Turok 2 (USA) ROM when the
-          launcher asks for it. It is remembered after the first time.
-          "@ | Set-Content "$dist/LEIAME.txt"
+          Run Turok2Recompiled.exe and pick your Turok 2 (USA 1.0) ROM when
+          the launcher asks for it. It is remembered after the first time.
+
+          Esc / F10 opens the menu. Graphics → Hz picks Original / 60 / 120.
+          "@ | Set-Content -Encoding utf8 "$dist/LEIAME.txt"
 
       - name: Upload build
         uses: actions/upload-artifact@v4
@@ -75,3 +92,4 @@ jobs:
           name: Turok2Recompiled-windows-x64
           path: dist/
           if-no-files-found: error
+          retention-days: 14

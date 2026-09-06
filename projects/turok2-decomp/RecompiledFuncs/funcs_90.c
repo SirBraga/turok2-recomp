@@ -3797,8 +3797,6 @@ L_0027B3B0:
     ctx->r6 = S32(ctx->r17 << 16);
     // 0x0027B3B8: sra         $a2, $a2, 16
     ctx->r6 = S32(SIGNED(ctx->r6) >> 16);
-        turok2_patch_hud_draw_scale(rdram, ctx);
-
     // 0x0027B3BC: lwc1        $f0, 0x48($sp)
     ctx->f0.u32l = MEM_W(ctx->r29, 0X48);
     // 0x0027B3C0: lw          $v0, 0x50($sp)

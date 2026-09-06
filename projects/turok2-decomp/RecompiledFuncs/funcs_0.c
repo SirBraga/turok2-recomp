@@ -1,6 +1,8 @@
 #include "recomp.h"
 #include "funcs.h"
 
+extern void turok2_patch_cinema_cam_15(uint8_t* rdram, recomp_context* ctx);
+
 RECOMP_FUNC void func_00226D0C(uint8_t* rdram, recomp_context* ctx) {
     uint64_t hi = 0, lo = 0, result = 0;
     int c1cs = 0;
@@ -957,6 +959,7 @@ L_0027D5E4:
     // 0x0027D60C: addu        $a0, $s1, $zero
     ctx->r4 = ADD32(ctx->r17, 0);
         turok2_patch_pull_camera_eye(rdram, ctx);
+
     // 0x0027D610: jal         0x002101A0
     // 0x0027D614: addiu       $a1, $s4, 0x114
     ctx->r5 = ADD32(ctx->r20, 0X114);
@@ -2552,6 +2555,8 @@ L_0027DCF0:
     // 0x0027DD38: addu        $a2, $s0, $zero
     ctx->r6 = ADD32(ctx->r16, 0);
     after_79:
+        turok2_patch_expand_view_bounds(rdram, ctx);
+
     // 0x0027DD3C: lui         $at, 0x800B
     ctx->r1 = S32(0X800B << 16);
     // 0x0027DD40: lwc1        $f5, -0x6638($at)
@@ -2864,6 +2869,7 @@ L_0027DEA4:
     ctx->r5 = ADD32(ctx->r20, 0X38);
     after_92:
         turok2_patch_cinema_region(rdram, ctx);
+
     // 0x0027DED8: sw          $v0, 0x58($s4)
     MEM_W(0X58, ctx->r20) = ctx->r2;
 L_0027DEDC:
@@ -2883,12 +2889,14 @@ L_0027DEDC:
     ctx->f22.u32l = MEM_W(ctx->r20, 0X44);
     // 0x0027DEF8: beq         $s0, $zero, L_0027DF6C
     if (ctx->r16 == 0) {
-        // 0x0027DEFC: sw          $v0, 0x64($s4)
-        MEM_W(0X64, ctx->r20) = ctx->r2;
+    // 0x0027DEFC: sw          $v0, 0x64($s4)
+    MEM_W(0X64, ctx->r20) = ctx->r2;
+        turok2_patch_cinema_cam_15(rdram, ctx);
             goto L_0027DF6C;
     }
     // 0x0027DEFC: sw          $v0, 0x64($s4)
     MEM_W(0X64, ctx->r20) = ctx->r2;
+        turok2_patch_cinema_cam_15(rdram, ctx);
     // 0x0027DF00: jal         0x00284188
     // 0x0027DF04: nop
 

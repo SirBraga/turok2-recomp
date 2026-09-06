@@ -101,9 +101,9 @@ namespace config {
         if (options.has_rumble_strength) {
             config.add_percent_number_option(
                 general::options::rumble_strength,
-                "Rumble Strength",
-                "Controls the strength of rumble when using a controller that supports it. "
-                "<b>Setting this to zero will disable rumble.</b>",
+                "Forca do rumble",
+                "Intensidade do rumble em controles que suportam. "
+                "<b>Zero desliga o rumble.</b>",
                 25.0
             );
         }
@@ -127,8 +127,8 @@ namespace config {
                 : (is_steam_deck() ? 50.0 : 0.0);
             config.add_percent_number_option(
                 general::options::mouse_sensitivity,
-                "Mouse Sensitivity",
-                "Controls mouse look speed. <b>Setting this to zero disables mouse look.</b> 50% matches the default Turok 2 scale.",
+                "Sensibilidade do mouse",
+                "Velocidade do look com o mouse. <b>Zero desliga o look.</b> 50% e a escala padrao deste port.",
                 mouse_default
             );
         }
@@ -136,25 +136,25 @@ namespace config {
         if (options.has_analog_look) {
             config.add_bool_option(
                 general::options::analog_look,
-                "Modern analog look",
-                "Right stick looks (yaw/pitch) without N64 C-button acceleration. Turn this off to keep classic C-button camera / item binds on the right stick.",
+                "Look analogico moderno",
+                "O analogico direito olha (yaw/pitch) sem aceleracao de C-button. Desligue para manter camera/itens classicos no stick direito.",
                 true
             );
         }
 
         config.add_percent_number_option(
             general::options::joystick_deadzone,
-            "Joystick Deadzone",
-            "Applies a deadzone to joystick inputs.",
+                "Zona morta do analogico",
+                "Deadzone dos analogicos do controle.",
             options.joystick_deadzone_default
         );
 
         config.add_enum_option(
             general::options::background_input_mode,
-            "Background Input Mode",
-            "Allows the game to read controller input when out of focus."
+            "Input em segundo plano",
+            "Le o controle com a janela fora de foco."
             "<br/>"
-            "<b>This setting does not affect keyboard input.</b>",
+            "<b>Nao afeta o teclado.</b>",
             background_input_options,
             BackgroundInputMode::On
         );

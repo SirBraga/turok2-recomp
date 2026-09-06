@@ -1647,8 +1647,6 @@ RECOMP_FUNC void func_00277CF0(uint8_t* rdram, recomp_context* ctx) {
     // 0x00277D54: sdc1        $f23, 0x68($sp)
     CHECK_FR(ctx, 23);
     SD(ctx->f23.u64, 0X68, ctx->r29);
-        turok2_patch_hud_icon_scale(rdram, ctx);
-
     // 0x00277D58: jal         0x00224DF4
     // 0x00277D5C: addiu       $a3, $zero, 0x1
     ctx->r7 = ADD32(0, 0X1);

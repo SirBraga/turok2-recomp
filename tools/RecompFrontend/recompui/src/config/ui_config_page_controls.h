@@ -65,7 +65,7 @@ public:
     void update_bindings(BindingList &new_bindings);
     recompinput::GameInput get_input_id() const { return input_id; }
     void focus_on_first_binding();
-    static constexpr float left_padding = 20.0f;
+    static constexpr float left_padding = 16.0f;
 };
 
 class GameInputRowsWrapper : public Element {
@@ -77,11 +77,11 @@ public:
         set_display(Display::Block);
         if (!name.empty()) {
             auto context = get_current_context();
-            Label *section_label = context.create_element<Label>(this, name, theme::Typography::LabelSM);
-            section_label->set_margin_top(24.0f);
+            Label *section_label = context.create_element<Label>(this, name, theme::Typography::LabelMD);
+            section_label->set_margin_top(16.0f);
             section_label->set_margin_left(GameInputRow::left_padding);
-            section_label->set_margin_bottom(8.0f);
-            section_label->set_color(theme::color::PrimaryL);
+            section_label->set_margin_bottom(6.0f);
+            section_label->set_color(theme::color::TextDim);
         }
     }
 };
@@ -101,7 +101,7 @@ protected:
     bool multiplayer_enabled;
     bool multiplayer_view_mappings;
 
-    bool single_player_show_keyboard_mappings = false;
+    bool single_player_show_keyboard_mappings = true;
 
     bool awaiting_binding = false;
     bool awaiting_binding_for_menu_action_button = false;
@@ -110,8 +110,8 @@ protected:
     bool queue_selected_player_profile_edit_focus = false;
 
     struct {
-        GameInputSection n64 = GameInputSection("");
-        GameInputSection menu = GameInputSection("Menu Inputs");
+        GameInputSection n64 = GameInputSection("Jogo");
+        GameInputSection menu = GameInputSection("Menus");
         std::vector<GameInputSection> other;
 
         std::vector<GameInputSection *> get_all_sections() {

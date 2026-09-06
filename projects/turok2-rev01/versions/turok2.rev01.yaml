@@ -8,9 +8,9 @@ options:
   src_path: src
   asm_path: asm
   symbol_addrs_path:
-    - ../versions/symbol_addrs.rev01.txt
-  undefined_funcs_auto_path: ../versions/undefined_funcs_auto.rev01.txt
-  undefined_syms_auto_path: ../versions/undefined_syms_auto.rev01.txt
+    - versions/symbol_addrs.rev01.txt
+  undefined_funcs_auto_path: versions/undefined_funcs_auto.rev01.txt
+  undefined_syms_auto_path: versions/undefined_syms_auto.rev01.txt
 
   compiler: SN64
   platform: n64
@@ -48,32 +48,45 @@ segments:
     subsegments:
       - [0x1100, asm]
 
-  # Last engine jr $ra delay slot is 0x8A4C0. Strings begin 0x8A4D0.
+  # The last engine `jr $ra` delay slot is 0x8A4C0, but the function does not
+  # end there: func_00289870 (u64 -> float) has a second path at 0x002898C4
+  # that masks the low word, sets the rounding bit and branches back with
+  # `beq $0, $0, -68`. Those three instructions are code at ROM 0x8A4C4.
+  # Strings ("header\0texture\0...") really begin at 0x8A4D0. Cutting at
+  # 0x8A4C4 orphaned the tail and forced a stub that returned a garbage float.
   - name: code_rodata
     type: code
     align: 1
-    start: 0x8A4C4
-    vram: 0x800898C4
+    start: 0x8A4D0
+    vram: 0x800898D0
     subsegments:
-      - [0x8A4C4, rodata]
+      - [0x8A4D0, rodata]
 
+  # rspboot/aspMain, then KSEG0 jump tables (ROM R → 0x80000000+R-0x400).
   - name: ucode
     type: bin
     start: 0x9F35C
     vram: 0x8009E75C
 
-  # First prologue after the ucode blob.
-  - name: libultra
+  # Engine jals into 0x004xxxxx resolve here: ROM = 0xA30D0 + (vram - 0x00400000).
+  # 44/68 unique targets are addiu-sp prologues; the rest are leaves (lui/lw).
+  # Last jr $ra delay is 0xC7A80. Vtables after that (0x0042FC60) are
+  # still this bank: boot DMA ends at ROM 0xD3DB8. Not a second VRAM.
+  - name: virtual
     type: code
     align: 1
-    start: 0xA3118
-    vram: 0x800A2518
+    start: 0xA30D0
+    vram: 0x00400000
     subsegments:
-      - [0xA3118, asm]
-      - [0xC7A84, data]
+      - [0xA30D0, asm]
+
+  - name: virtual_data
+    type: bin
+    start: 0xC7A84
+    vram: 0x004249B4
 
   - name: rest
     type: bin
-    start: 0xC8000
+    start: 0xD3DB8
 
   - [0x2000000]

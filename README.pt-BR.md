@@ -39,7 +39,7 @@ Este repositório é essa tentativa. Estou construindo porque eu amo o jogo, nã
 
 No N64 o jogo rodava a 30 Hz na jogatina e 15 Hz nas cinemáticas. Este port **não** finge suavidade misturando esses frames. O engine mesmo anda a 120 updates únicos, o tempo de cinema continua em segundos do original, e os contadores de 15/30 são escalados para não disparar 4× / 8×. A interpolação do RT64 fica desligada de propósito.
 
-Se quiser o scheduler 30/15 original pra comparar, use `TUROK2_AUTHORED_CADENCE=1`. Se quiser A/B em 60 Hz, use `TUROK2_UNIQUE_60=1`. O padrão é **unique 120**.
+No menu Graphics → **Hz** escolhe a cadência do motor: **Original** (N64 30/15), **60** ou **120** (padrão). `TUROK2_AUTHORED_CADENCE=1` e `TUROK2_UNIQUE_60=1` ainda sobrescrevem o menu.
 
 ---
 
@@ -105,7 +105,7 @@ Cartucho N64
 
 - [ ] Pack de textura HD (F2 já dumpa hash pra esse trabalho)
 - [ ] Widescreen de verdade e HUD nítido
-- [ ] Acessibilidade: FOV, sensibilidade, deadzone, modo 60 Hz opcional
+- [x] Acessibilidade: FOV, sensibilidade, deadzone, Graphics → Hz (Original / 60 / 120)
 - [ ] API de mod que não seja só uma pasta chamada `mods`
 
 ### 5. Mesmo engine, próximos jogos

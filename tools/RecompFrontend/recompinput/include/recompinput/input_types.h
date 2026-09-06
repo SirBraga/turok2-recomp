@@ -87,6 +87,10 @@ namespace recompinput {
             return InputField{ InputType::ControllerAnalog, positive ? (static_cast<int32_t>(axis) + 1) : -(static_cast<int32_t>(axis) + 1) };
         }
 
+        static InputField mouse(int sdl_button) {
+            return InputField{ InputType::Mouse, static_cast<int32_t>(sdl_button) };
+        }
+
         bool is_empty() const {
             return input_type == InputType::None;
         }

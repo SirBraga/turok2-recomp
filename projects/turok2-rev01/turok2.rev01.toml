@@ -10,52 +10,94 @@ output_func_path = "RecompiledFuncs"
 use_absolute_symbols = true
 
 [patches]
-# Smoke-pass refusals. Many are bad prologue boundaries, not proven CP0.
+# Only functions whose MIPS contains ops N64Recomp cannot emit:
+# mfc0/mtc0 other than Status (12), teq/tge/tlt family, CACHE.
+# Refresh with tools/refresh-stubs.py. Do not mass-stub Failed to analyze.
 # Do not copy this list into the US 1.0 port.
 stubs = [
-    "func_00250284",
-    "func_0024E5E0",
-    "func_0024DA6C",
-    "func_0024D828",
-    "func_0024D80C",
-    "func_0024D27C",
-    "func_0024D1D8",
-    "func_0024D1A0",
-    "func_0024D088",
-    "func_0024CF2C",
-    "func_0024901C",
-    "func_00248FC8",
-    "func_00248BA4",
-    "func_00248A8C",
-    "func_00248A30",
-    "func_00248230",
-    "func_00247BE8",
-    "func_00247B70",
-    "func_00247984",
-    "func_002477A0",
-    "func_00247748",
-    "func_0024634C",
-    "func_00245BEC",
-    "func_00242044",
-    "func_00241D70",
-    "func_00241BA0",
-    "func_0023F68C",
-    "func_0023F124",
-    "func_0023B27C",
-    "func_0023B1CC",
-    "func_0023B168",
-    "func_00236368",
-    "func_0022D964",
-    "func_0022C040",
-    "func_0022090C",
-    "func_0021E8D0",
-    "func_0021A560",
-    "func_0021A250",
-    "func_00218DE4",
-    "func_00212F58",
-    "func_0020245C",
+    "func_00283810",
+    "func_00287B00",
+    "func_0041BBE0",
     "func_80000400",
     "func_80000488",
-    "func_002009DC",
+    "func_00276230",
+    "func_002762B0",
+    "func_00281640",
+    "func_00281F40",
+    "func_002834F0",
+    "func_00283670",
+    "func_00283740",
+    "func_00283820",
+    "func_00287ABC",
+    "func_00287AD8",
+    "func_00287B0C",
+    "func_00287B90",
+    "func_00287D68",
+    "func_002880DC",
 ]
-ignored = []
+# __osSiRawStartDma / __osSiDeviceBusy. Host completes the 64-byte PIF
+# transfer; the generated copies wait on SI_STATUS (0xA4800018).
+ignored = [
+    "func_0027FA30",
+    "func_0027FAF0",
+]
+
+# IDO/SN64 `teq $zero, $zero` asserts on error paths. N64Recomp cannot
+# emit traps; nop them so the rest of the function is generated. Do not
+# stub the whole gfx thread (func_00273790).
+[[patches.instruction]]
+func = "func_002734A0"
+vram = 0x273728
+value = 0x00000000
+
+[[patches.instruction]]
+func = "func_00273790"
+vram = 0x273A54
+value = 0x00000000
+
+[[patches.instruction]]
+func = "func_00275F58"
+vram = 0x27605C
+value = 0x00000000
+
+# After `lhu $6, 0x526($s0)` in func_00268444. $a2 is gSPFogPosition min.
+# Cap wrap (>=997). Do not force min=0; that saturates black fog.
+[[patches.hook]]
+func = "func_00268444"
+before_vram = 0x00268A2C
+text = """
+    turok2_rev01_clamp_fog_min(rdram, ctx);
+"""
+
+# After `sw $a0, 0x4($a1)` of G_MTX_PROJECTION. $a0 is cam+0x368+frame,
+# $s0 is the camera. Title P has sx/sy right and z/w in the wrong cells.
+[[patches.hook]]
+func = "func_00268444"
+before_vram = 0x0026861C
+text = """
+    turok2_rev01_fix_projection(rdram, ctx);
+"""
+
+# End of guPerspectiveF, $s0 still points at the float 4x4.
+[[patches.hook]]
+func = "func_0027E1D0"
+before_vram = 0x0027E338
+text = """
+    turok2_rev01_dump_perspf(rdram, ctx);
+"""
+
+# Mark glist, then after the closing pipesync drop G_TRI* so title 2D
+# can be tested without the 3D pass. Env TUROK2_STRIP_TRIS=1 only.
+[[patches.hook]]
+func = "func_00268444"
+before_vram = 0x00268444
+text = """
+    turok2_rev01_mark_dl(rdram, ctx);
+"""
+
+[[patches.hook]]
+func = "func_00268444"
+before_vram = 0x00268C08
+text = """
+    turok2_rev01_strip_tris(rdram, ctx);
+"""

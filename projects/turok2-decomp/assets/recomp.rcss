@@ -1,4 +1,7 @@
-/* Turok 2 bring-up theme. RecompFrontend supplies the base component styles. */
+/* Hallmark · pre-emit critique: P4 H4 E4 S4 R4 V4
+ * theme: custom Turok stone / rust · register: product
+ * paper #0A0806 · accent #C45224 · face LatoLatin
+ */
 body {
     font-family: "LatoLatin";
 }

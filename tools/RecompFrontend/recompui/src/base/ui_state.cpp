@@ -5,6 +5,7 @@
 #include <SDL2/SDL_video.h>
 #endif
 #include <chrono>
+#include <cstdio>
 
 #include "rt64_render_hooks.h"
 
@@ -502,6 +503,43 @@ void recompui::get_window_size(int& width, int& height) {
     SDL_GetWindowSizeInPixels(window, &width, &height);
 }
 
+// RmlUi is sized from the RT64 swap chain, which is not always the same as
+// the SDL window in points (Retina). SDL2 reports mouse events in points, so
+// without this the hit test lands in the wrong place.
+static int rml_surface_width = 0;
+static int rml_surface_height = 0;
+
+static void scale_sdl_mouse_to_rml(SDL_Event& ev) {
+    if (window == nullptr || rml_surface_width <= 0 || rml_surface_height <= 0) {
+        return;
+    }
+    if (ev.type != SDL_MOUSEMOTION && ev.type != SDL_MOUSEBUTTONDOWN && ev.type != SDL_MOUSEBUTTONUP) {
+        return;
+    }
+    int win_w = 0;
+    int win_h = 0;
+    SDL_GetWindowSize(window, &win_w, &win_h);
+    static int logged_w = 0;
+    static int logged_h = 0;
+    if (logged_w != rml_surface_width || logged_h != rml_surface_height) {
+        logged_w = rml_surface_width;
+        logged_h = rml_surface_height;
+        std::fprintf(stderr, "[ui] mouse scale window=%dx%d surface=%dx%d\n",
+            win_w, win_h, rml_surface_width, rml_surface_height);
+    }
+    if (win_w <= 0 || win_h <= 0 ||
+        (win_w == rml_surface_width && win_h == rml_surface_height)) {
+        return;
+    }
+    if (ev.type == SDL_MOUSEMOTION) {
+        ev.motion.x = ev.motion.x * rml_surface_width / win_w;
+        ev.motion.y = ev.motion.y * rml_surface_height / win_h;
+    } else {
+        ev.button.x = ev.button.x * rml_surface_width / win_w;
+        ev.button.y = ev.button.y * rml_surface_height / win_h;
+    }
+}
+
 inline const std::string read_file_to_string(std::filesystem::path path) {
     std::ifstream stream = std::ifstream{path};
     std::ostringstream ss;
@@ -657,6 +695,11 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
         return;
     }
 
+    if (swap_chain_framebuffer != nullptr) {
+        rml_surface_width = swap_chain_framebuffer->getWidth();
+        rml_surface_height = swap_chain_framebuffer->getHeight();
+    }
+
     // Return to the launcher if no menu is open and the game isn't started.
     if (!recompui::is_any_context_shown() && !ultramodern::is_game_started()) {
         recompui::show_context(recompui::get_launcher_context_id(), "");
@@ -685,6 +728,7 @@ void draw_hook(plume::RenderCommandList* command_list, plume::RenderFramebuffer*
     bool all_input_is_disabled = recompinput::all_input_disabled();
 
     while (recompui::try_deque_event(cur_event)) {
+        scale_sdl_mouse_to_rml(cur_event);
         bool context_capturing_input = recompui::is_context_capturing_input();
         bool context_capturing_mouse = recompui::is_context_capturing_mouse();
 

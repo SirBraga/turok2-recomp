@@ -7,12 +7,27 @@ B — N64Recomp static port (not matching decomp)
 ## Phase
 In-game debug HUD: F8 skips cinema, F5/F7 save/load Adia, F3 toggles HUD.
 
-Playable baseline: unique 60 Hz Update/Draw (cinema time in seconds unchanged),
+Playable baseline: unique 120 Hz Update/Draw by default (Graphics → Hz).
+Original (30/15) and unique 60 are menu options. Env
+`TUROK2_AUTHORED_CADENCE` / `TUROK2_UNIQUE_60` still override the menu.
 RT64 interpolation off, RAX/audio bank path repaired.
 
 ## ROM
 - File: `projects/turok2-decomp/baserom.us.z64` (local, not committed)
 - SHA1: `fb0400f21e3f043939ab56500c7b12a3231006f1`
+
+## Angrylion A/B (sidecar, 2026-09-05)
+User asked for Angrylion without overwriting the RT64 recomp.
+Isolated tree: `tools/angrylion-ab/` (copy of the ROM, own plugins +
+`config/`). `Turok2Recompiled` / RT64 untouched.
+Launch: `tools/angrylion-ab/launch-turok2.sh`
+Stack: brew Mupen64Plus 2.6.0 + Angrylion RDP Plus + rsp-cxd4.
+This is native 60 Hz N64, not unique-120. User 2026-09-05 23:59:
+**no flicks on Angrylion.** Authored DLs at 60 Hz are clean. Isolated
+flats are the recomp path (unique-120 CPU frames and/or RT64).
+There is no second ultramodern video plugin — only RT64 is wired.
+Angrylion / paraLLEl-RDP are emulator RDP cores, not a drop-in
+`RendererContext`. Do not treat this A/B as "swap RT64 tonight".
 
 ## Mapping
 | Name | Address | Notes |
@@ -158,18 +173,18 @@ Watch stderr `[fps:engine]`, `[rt64:source-rate]`, and `[rt64:interp]`.
 - A/B: `TUROK2_AUTHORED_CADENCE=1` skips every integer scale hook.
 
 ### Graphics menu / texture packs / camera 2026-09-04
-- Graphics tab: Filtering (default Pixel Scaling), post-blend dither Off,
-  HUD/2D upscale (default All), FOV 1.0–1.5, far/fog 1.0–2.0. Extra keys
-  live in `graphics.json`, not `GraphicsConfig`. Applied via
-  `apply_extra_graphics_options`.
-- HUD/2D All renders texrects at output resolution (crisp HUD). Original
-  keeps 240p. This is sharpness, not HUD *size*.
-- HUD Size 0.50–1.00 scales gameplay 2D draw in `func_0027B320`
-  (ScaleX/Y on the stack) and 3D digits/icons in `func_00277CF0`
-  (`$f22`/`$f24` before `func_0027A7A0`). Pixel positions stay so
-  corners hold. First-person weapon uses on-screen projection and is
-  not scaled. Pause/cinema overlay callers (`0x004xxxxx`) are skipped.
-  Texture dump (F2) is deferred; hashes stay local, do not commit ROM.
+- **REMOVED 2026-09-05 at user request.** The Video tab now exposes only
+  **Field of View**. Filtering (Pixel Scaling), post-blend dither (off) and
+  HUD/2D upscale (All) are still sent to RT64, but as fixed values from
+  `ui_config_tab_graphics.cpp`, not options. HUD Size, Draw Distance and Fog
+  Distance are gone entirely: the `turok2_patch_hud_draw_scale` /
+  `turok2_patch_hud_icon_scale` hooks were deleted from `turok2.us.toml` and
+  `native_60.cpp`, and the far-clip scale block was dropped from
+  `turok2_patch_gameplay_camera`. `turok2_set_camera_scales` now takes only
+  the FOV. Do **not** re-add these without the user asking.
+- The fog floor survived the removal as `kFogDistanceScale = 2.0` — it was
+  never a user setting, it keeps the fog wall off the authored N64 range.
+- Texture dump (F2) is deferred; hashes stay local, do not commit ROM.
 - General: mouse sensitivity (50% = old 1.0), analog look, deadzone 20%.
 - Texture packs: register `rt64.json` / `.rtz` before `recomp::start`.
   Skeleton `mods/turok2-hd-example/` has no ROM textures.
@@ -183,7 +198,6 @@ Watch stderr `[fps:engine]`, `[rt64:source-rate]`, and `[rt64:interp]`.
   float there. Do **not** force min=999: `fm=128000/(1000-min)` is
   int16, 999 washes the framebuffer grey (Adia 2026-09-04). Authored
   min is already 995; only push when min < 900, cap at 996.
-  HUD Size customization is parked.
 - Object model LOD2: T2 `CIntelligenceBase` has `m_LOD2Dist` / `m_nModelLOD2`
   in the header, but no T2 code compares +0x08 after `m_pIntelligence`.
   `func_00266570` reads the union (Action idle/go), not the base pair.
@@ -643,8 +657,11 @@ already serialize.
 room — that *is* a fog frame, same count as the measured flats) plus a
 long `NULL` stream after the 7586 cut (`keep=801DAF10` for hundreds of
 Draws). That stream is the 2D Primagen block; forcing a 3D section there
-is wrong. Isolated 3D `NULL`s were only two pairs. Hook is now
-measure-only. Do not hold `m_pCurrentRegion` on SWITCH.
+is wrong. Isolated 3D `NULL`s were only two pairs. Do not hold
+`m_pCurrentRegion` on SWITCH. **2026-09-05 night:** user flash at the
+7586 JUMP was that NULL stream (`preg=0` for ~240 Draws). Hook now
+KEEPs the last pointer for **at most two** NULL Draws, then lets the
+2D block through. Opt-out `TUROK2_NO_REGION_HOLD=1`.
 
 **Skip-main FAILED eye-test 2026-09-05.** `/tmp/adon-skip-main.log`:
 `[cin:skip] main=801198F0 path=806FF120` from the first cinema Draw
@@ -688,10 +705,11 @@ fade** — it is the shot going to black before the 2D block
 (`preg=0`, `sky=1`).
 
 Where to resume, in order of promise:
-0. **3D coverage miss on a constant `000020` fill.** Chamber sky/vis/
-   preg do not drop. Next evidence: which world/section Draw is
-   skipped for one frame (frame-counted, leftover-modulated).
-   `func_0027C4E4` is the fog blender — do not patch it as a skip.
+0. **3D coverage miss on a constant fill** (Adon `000020`, stairs
+   `000000`). Chamber sky/vis/preg do not drop. World/section Draw
+   is `func_002222E0` (from `func_0027E770`). Shipping:
+   `turok2_patch_expand_view_bounds`. `func_0027C4E4` is the fog
+   blender — do not patch it as a skip.
 1. The 65-call 2D block after the 7586 fade. Authored; not the
    isolated 3D flats.
 
@@ -739,18 +757,115 @@ Probe shipping 2026-09-05 (eye-test, do not leave if it fails):
 1. Cap mouse look at 0.10 rad/Update in `turok2_patch_direct_mouse_look`.
    Opt-out `TUROK2_NO_LOOK_CAP=1`. Override `TUROK2_LOOK_CAP=0.06`…`0.50`.
 2. Pull the constructed eye 10 units opposite look before
-   `func_002101A0` copies `m_mfViewOrient` translation into `m_vPos`
-   (`turok2_patch_pull_camera_eye` @ `0x0027D610`). Also shifts
-   ViewParams `m_vPos` (`cam+0x038`) so region vis tracks the same
-   origin. Gameplay main camera only. Opt-out `TUROK2_NO_EYE_PULL=1`
-   or `TUROK2_EYE_PULL=0`. Do not turn wide cull off again.
-   Do not leftover stored `gFrameCount`. If the view just feels
-   shifted sideways, the look-axis sign is wrong — revert the pull
-   and keep only the cap.
+   `func_002101A0` copies `m_mfViewOrient` translation into
+   `CCamera.m_vPos` (`cam+0x114`). **Mtx only.** Writing
+   ViewParams `m_vPos` (`cam+0x038`) walked world Z by +10 per
+   Update (live log: `(-1540.9,-351.4,884)` → `Z=60860` while
+   X/Y froze). Next Update reloads the eye from +0x038, so that
+   persist punched the near plane / region vis through geometry
+   — the look-up/down flick (Adia `000000`, Joshua `6E6E78`).
+   Sky pitch gate **failed**. Persist-only pull **failed**. Pitched
+   opposite-look **failed** (user 2026-09-05 20:31, "mesmo bo"):
+   live `[cam:pull] pitch=1.57 opp=(0.00,-1.00,0.00)` on the drawn
+   path camera `806FF120` and the stairs still flashed. Pull is
+   **off by default** (opt-in `TUROK2_EYE_PULL=1`). Keep the look
+   cap. Do not retune pull.
 
-Adon cinema is a different class until proven otherwise: path camera
-`806FF120`, flats RGB(0,0,27) with letterbox, not Adia black / Joshua
-gray. The gameplay pull is skipped while `g_cinema`. `m_DrawFrame`
+   User 2026-09-05 20:37: stairs flash is the **Adon isolated fill**,
+   not the sky card. Do not grow TCorners for `m_ViewVolume` (that
+   was the sky-class patch). World Draw is `func_002222E0`: AABB
+   vs `m_ViewMin/Max`, then objects vs `m_ViewVolume`.
+   `turok2_patch_expand_view_bounds` after `func_0026B9E0` expands
+   that cull box around the eye and rebuilds the volume from a
+   grown XZ *copy*, then restores TCorners. **Was written but never
+   hooked** (not in `turok2.us.toml` / header) — KEEP-region and
+   the unhooked AABB both left Adon + stairs flashing. Hooked
+   2026-09-05 at `0x0027DD3C`; `[scene:draw]` at `0x00222510`.
+   **Eye-test failed.** Chamber `nsec=5` the whole time, AABB already
+   ~50k, `grow=0`. Path cam `806FF120` is the only `func_002222E0`
+   caller; main never hits it. 181 `nsec=0` after the outdoor JUMP
+   is the load hole, not the isolated flats (empty stayed 181).
+   Isolated flats are silent — they never reach `0x0022250C`.
+   Two skip gates: `0x8011AAF1` (alt path `func_00221D3C`) and
+   `0x80130940` (skip `func_0027E770`). Hook
+   `turok2_patch_world_draw_gate` forces those for **at most two**
+   Draws.    **Eye-test / log failed:** zero `[scene:gate]` lines —
+   both flags stayed 0. Isolated flats happen *inside* the loop
+   (`nsec=5`). Vis-mask hold **failed** (user 2026-09-05 23:17,
+   "ainda permanece"): live `geom=00000010 cvis=FFFFFFFF force=0`
+   every line — the stack AND never dropped, so there was nothing
+   to restore. Next class (not another mask hold / AABB / KEEP /
+   skip-gate):
+   1. Reload `m_nActiveGridSections` from `func_002216DC` when
+      `nsec<=0` and `preg` is live. Load queries `m_AnimMin/Max`
+      (`+0x350/+0x35C`), not ViewMin — copy the expanded View
+      box in, Load, restore AnimMin. That is the 186-Draw hole
+      at the Primagen cut. Opt-out `TUROK2_NO_SEC_RELOAD=1`.
+   2. Force a zero geo/instance vis AND through
+      (`turok2_patch_scene_vis_pass` at `0x002225D4` /
+      `0x00222608`). A geo without bit 4, or `instance+0x84==0`,
+      skips every emit with nsec still 5. Opt-out
+      `TUROK2_NO_VIS_PASS=1`.
+   3. Count `jal func_002152AC` (`emits=` / `MISS` when
+      last nsec>0 and emits==0). If emits stay high on a flat,
+      stop CPU cull patches — that is fog/RDP/cover.
+   Reload + vis-pass **failed** (user 2026-09-05 23:25,
+   "mesmo problema"). Section AABB skip **failed to kill
+   the flash** (user 2026-09-05 23:33, "ainda tem"): `sec`
+   matched `nsec`, chamber `nsec=5` had `emits=1` on 203/204
+   Draws, fog min stayed 995. Isolated flats are not a CPU
+   list/AND/AABB miss. Present-side: hold the last swapchain
+   for at most two workloads when the pair's 3D tri count
+   collapses (`[tri:hold]`, opt-out `TUROK2_NO_TRI_HOLD=1`).
+   A longer streak is the authored 2D / cut hole — let it
+   through.
+   Do not leftover `gFrameCount`. Do not turn wide cull off.
+   Do not treat 2-frame cinema KEEP, AABB expand, skip gates,
+   vis-mask hold, vis-pass, AnimMin reload, Draw AABB skip,
+   or RT64 tri-hold as the Adon / stairs fix. Do not freeze
+   `func_0027C4E4`.
+
+Tri-hold **failed** (user 2026-09-05 23:39, "ainda permanece").
+User asked an A/B: keep unique-120 cinema (`currentTime`, increment
+`0.125`, anims) and sample **only the path camera** at authored
+15 Hz. `turok2_patch_cinema_cam_15` @ `0x0027DF00` (after region
++ vis) leftover-steps at 15/s and replays the last ViewParams /
+pose / ViewMin / RSP view / FOV / far bundle on the other
+Updates. Fog + sky stay live. Not `TUROK2_CINEMA_AUTHORED` (that
+drops every cinema tick) and not a lerp (kill-listed).
+**Failed** (user 2026-09-06 00:10, "nao resolveu os flics").
+Hook is off; path camera follows Graphics → Hz. Opt-in
+`TUROK2_CAM_15=1` only. Do not treat a 15 Hz camera undersample
+as the Adon / stairs fix.
+
+User 2026-09-05 18:52 video (Port of Adia, looking straight up):
+sky is **not** leftover-fast. Frame diffs sit at `d≈0.5` then spike
+to 12–16. A `CSkyLayer` (`fv[2][5][3]`, scroll X/Z, Y-up) shows as
+a diagonal translucent card with black shards — **draw / coverage**,
+not leftover and not another pull gate.
+
+Eye-pull gates **failed** (user 2026-09-05 20:00+): mtx Z.y at
+`0x0027D610` stayed `look_y=-0.00`; player+0xAC8 is live but looking
+**up is positive** on this ROM. Do not retune or flip that gate.
+Do not leftover-hold sky, `0x6D1B`, or `gFrameCount`. Sky
+scroll/frame already × increment.
+
+Graphical cause: `func_00282340` @ `0x00282640` builds each sky
+vert as `(m_vTCorners[i].x, CSkyLayer.m_Height, m_vTCorners[i].z)`.
+`turok2_patch_widen_camera_culling` mutates those same five points
+for `m_ViewVolume`, so the cloud mesh shears. Do **not** set
+`TUROK2_WIDE_CULL_OFF=1` (already A/B failed for the Joshua / Adia
+black void). Shipping fix: snapshot authored TCorners in the widen
+hook; `turok2_patch_sky_layer_corners` @ `0x00282770` (after the
+near-plane clip) restores that XZ and grows the plane when look-up
+collapses the span below `0.55 * m_FarClip`. Opt-out
+`TUROK2_NO_SKY_CORNER_FIX=1`. If the card remains, next is mesh
+coverage vs far 2.0 / pitch — not pull and not leftover scroll.
+
+Adon cinema and the Adia stairs flash are the **same class**: isolated
+frames of fog-colored fill because `func_002222E0` missed the world
+(Adon `000020`/`00001B`, Adia `000000`). Path camera `806FF120` after
+F8. Joshua portal void stays separate until proven. `m_DrawFrame`
 dirty hook **failed**. Cinema cut-hold **failed**. Region hold **failed**
 (SWITCH was the wrong pairing). Skip-main **failed** (`[cin:skip]`
 fired; flats stayed). Do not lerp the cinema camera for 2× Hz.
@@ -813,18 +928,27 @@ The 4× short blast is the one-Update special case:
   every unique Update, then `m_Count -= 1`. An N-burst lasts
   N/120 s instead of N/30 s.
 
-`turok2_patch_oneshot_particle_hold` now sits before `c.lt.s` at
-`0x00230DF8` (not after `bc1f`). The first compare `cFrame >= 1`
-was killing the sprite at ~66 ms and skipping the old hook, so a
-33 ms Advance-count hold still read as a wink. Both death
-branches are held on wall-clock 30/s for **8 authored frames**
-(~267 ms): `$f1` forced to 0 so `c.lt.s` stays live, `$v0`
-rewritten to 2 so `beq $fp` falls through.
-`turok2_patch_particle_nframes_cull` at `0x00231128` keeps
-authored `nFrames` when a nearby particle would force `1` — a
-barrel cluster was collapsing every flipbook to a oneshot.
-`turok2_patch_fx_timer_fire_hold` still caps fire at 30/s only
-when spacing `< 0.75 * authored_step`. Shared opt-out
+User 2026-09-05 after the 8-frame oneshot hold: duration was close
+("quase lá") but **some sounds disappeared**, and explosions should
+use the same leftover as water / totem laser (`0x6D20`), not a
+reconstructed lifetime.
+
+The 8-frame hold (~267 ms) and the skip-all proximity cull kept
+sprites in the 128-slot pool and delayed `L_00230F18`
+(`func_00236EA0` / `func_00275544`). Death SFX never fired on the
+authored beat.
+
+`turok2_patch_oneshot_particle_hold` still sits before `c.lt.s` at
+`0x00230DF8`. Both death branches now use the **0x6D20 leftover**
+(one authored 30 Hz step, consume at 1.0). While holding: `$f1=0`
+so `c.lt.s` stays live, `$v0=2` so `beq $fp` falls through. On
+consume the death path runs so SFX fire.
+`turok2_patch_particle_nframes_cull` leftover-holds the
+`nFrames=1` store at `0x00231128` to 30/s — apply on consume, do
+not skip forever.
+`turok2_patch_fx_timer_fire_hold` **allows the first fire** (same
+as 0x6D20 allowing the first increment) and leftovers later fires
+to 30/s only when spacing `< 0.75 * authored_step`. Shared opt-out
 `TUROK2_NO_EXPLOSION_HOLD=1`.
 
 Object death mesh (`func_00218DCC` @ `0x00218F60`) is
@@ -1002,9 +1126,23 @@ misplaced entries broke boot. Remaining ones (texture loader, audio thread
   float from the ROM before leftover-holding it — holding a correct clock
   makes flipbooks 4× too long. A hook after `bc1f` cannot lengthen
   `nFrames==1`: `cFrame >= 1` kills first (~66 ms). Hold before
-  `c.lt.s`. Nearby-particle `nFrames=1` stores collapse a cluster
-  flipbook to that oneshot path — skip the store, do not leftover
-  `m_cFrame`.
+  `c.lt.s` on the 0x6D20 leftover (one authored step), then let
+  death + SFX run. Nearby-particle `nFrames=1` stores collapse a
+  cluster 4× as often — leftover-hold that store to 30/s; do not
+  skip it forever (pool fills, sounds drop). Do not leftover
+  `m_cFrame`. Do not invent an 8-frame oneshot lifetime.
+- `CCamera.m_vTCorners` is not cull-only. Wide cull stores the expanded
+  far-plane points back into the same array `func_00282340` flattens onto
+  `CSkyLayer.m_Height`. That shear is the look-up sky card. Keep widen
+  for `m_ViewVolume`; give sky the authored XZ (and grow it if pitch
+  collapsed the span). Do not set `TUROK2_WIDE_CULL_OFF=1` for this.
+- A per-frame camera pull must not write `ViewParams.m_vPos` (`+0x038`).
+  `func_0027D160` reloads the eye from that field, so a +10 store walks
+  the origin. The stairs flash is **not** that probe: pitched
+  opposite-look with `opp.y=-1` still flickered. Leave pull off.
+  Stairs flash is the Adon world-Draw miss (`func_002222E0`), not
+  the sky card. Expand `m_ViewMin/Max` / volume from a copy; do
+  not grow TCorners in place.
 - A knob that changes a symptom's *rate* without removing it has found the
   clock, not the cause. Turning the 0x6D20 hold off made the Adon flicker 1.6x
   denser, which proved a frame counter drives it after six presentation-side

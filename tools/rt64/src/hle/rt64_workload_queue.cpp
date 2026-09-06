@@ -1003,6 +1003,60 @@ namespace RT64 {
                                 presentableScene ? 1 : 0,
                                 fbPair.fillRectOnly ? 1 : 0);
                         }
+                        // Is the flat frame a frame where the game never submitted
+                        // the world, or one where it did and RT64 lost it? Counts
+                        // triangles in the 3D projections of every scene pair and
+                        // prints the ones that collapse against the recent normal.
+                        static const bool triCount = std::getenv("TUROK2_TRI_COUNT") != nullptr;
+                        if (triCount && fbPair.hasSceneProjection()) {
+                            uint32_t worldTris = 0;
+                            uint32_t worldCalls = 0;
+                            uint32_t sceneProjections = 0;
+                            for (uint32_t p = 0; p < fbPair.projectionCount; p++) {
+                                const Projection &proj = fbPair.projections[p];
+                                if ((proj.type != Projection::Type::Perspective) &&
+                                    (proj.type != Projection::Type::Triangle)) {
+                                    continue;
+                                }
+                                sceneProjections++;
+                                for (uint32_t g = 0; g < proj.gameCallCount; g++) {
+                                    worldTris += proj.gameCalls[g].callDesc.triangleCount;
+                                    worldCalls++;
+                                }
+                            }
+
+                            static uint64_t scenePairs = 0;
+                            static double runningAvg = 0.0;
+                            scenePairs++;
+                            // Flag against the established normal, then fold this
+                            // pair in, so a collapse cannot hide inside its own
+                            // average.
+                            const bool haveBaseline = scenePairs > 30;
+                            const bool empty = fbPair.drawColorRect.isEmpty();
+                            const bool collapsed = haveBaseline && (worldTris < (runningAvg * 0.25));
+                            // Tris left the game but painted nothing: RSP/RT64
+                            // lost the raster. That is the other half of the test.
+                            const bool lost = empty && (worldTris >= 50);
+                            const bool fillOnly = fbPair.fillRectOnly;
+                            runningAvg = (scenePairs == 1) ? worldTris : (runningAvg * 0.95 + worldTris * 0.05);
+
+                            if (collapsed || lost || fillOnly || ((scenePairs % 240) == 0)) {
+                                const Turok2AdonCover cover = turok2_adon_cover_copy();
+                                const char *tag = lost ? "LOST" : (collapsed ? "COLLAPSE" : (fillOnly ? "FILL" : "hb"));
+                                std::fprintf(stderr,
+                                    "[tri:count] %s n=%llu tris=%u calls=%u proj=%u avg=%.0f "
+                                    "empty=%d fill=%d w=%d h=%d draw=%u cinema=%u fog=%02X%02X%02X cam=%08X\n",
+                                    tag,
+                                    (unsigned long long)scenePairs, worldTris, worldCalls,
+                                    sceneProjections, runningAvg,
+                                    empty ? 1 : 0, fillOnly ? 1 : 0,
+                                    empty ? 0 : fbPair.drawColorRect.width(false, true),
+                                    empty ? 0 : fbPair.drawColorRect.height(false, true),
+                                    cover.draw, cover.cinema,
+                                    cover.fog_r, cover.fog_g, cover.fog_b, cover.cam);
+                            }
+                        }
+
                         // Logged before the skip below: a pair whose geometry was
                         // submitted but rasterized nothing has an empty color
                         // rect, and every trace so far discarded exactly those.
@@ -1061,10 +1115,62 @@ namespace RT64 {
                             blockedByFullScreenFill.insert(colorImg.address);
                         }
 
+                        // Isolated Adon / stairs flats: the CPU list is populated
+                        // and func_002152AC still runs, but this pair's 3D tris
+                        // collapse to sky/letterbox/fill. SkipBuffering would
+                        // scan that out. Hold the last swapchain for at most two
+                        // workloads; a longer streak is an authored cut / 2D
+                        // block. Opt-out: TUROK2_NO_TRI_HOLD=1.
+                        static const bool triHoldOff =
+                            std::getenv("TUROK2_NO_TRI_HOLD") != nullptr;
+                        uint32_t worldTris = 0;
+                        if (fbPair.hasSceneProjection()) {
+                            for (uint32_t p = 0; p < fbPair.projectionCount; p++) {
+                                const Projection &proj = fbPair.projections[p];
+                                if ((proj.type != Projection::Type::Perspective) &&
+                                    (proj.type != Projection::Type::Triangle)) {
+                                    continue;
+                                }
+                                for (uint32_t g = 0; g < proj.gameCallCount; g++) {
+                                    worldTris += proj.gameCalls[g].callDesc.triangleCount;
+                                }
+                            }
+                        }
+                        static uint64_t scenePairs = 0;
+                        static double runningAvg = 0.0;
+                        static uint32_t collapseStreak = 0;
+                        bool holdCollapse = false;
+                        if (fbPair.hasSceneProjection()) {
+                            scenePairs++;
+                            const bool collapsed =
+                                (scenePairs > 45) &&
+                                (runningAvg > 80.0) &&
+                                ((worldTris < 20u) ||
+                                 (worldTris < (runningAvg * 0.08)));
+                            if (collapsed) {
+                                collapseStreak++;
+                            }
+                            else {
+                                collapseStreak = 0;
+                            }
+                            holdCollapse = !triHoldOff && collapsed &&
+                                           (collapseStreak <= 2);
+                            runningAvg = (scenePairs == 1)
+                                ? double(worldTris)
+                                : (runningAvg * 0.95 + double(worldTris) * 0.05);
+                            if (holdCollapse) {
+                                std::fprintf(stderr,
+                                    "[tri:hold] streak=%u tris=%u avg=%.0f color=%08X\n",
+                                    collapseStreak, worldTris, runningAvg,
+                                    colorImg.address);
+                            }
+                        }
+
                         // SkipBuffering presents every color in this vector. Keep
                         // fill / letterbox / copy-only pairs out of it, and do not
                         // revive a 3D pair that a newer full-screen clear wiped.
                         if (presentableScene &&
+                            !holdCollapse &&
                             (blockedByFullScreenFill.find(colorImg.address) == blockedByFullScreenFill.end()) &&
                             (std::find(colorVector.begin(), colorVector.end(), colorImg.address) == colorVector.end())) {
                             colorVector.push_back(colorImg.address);

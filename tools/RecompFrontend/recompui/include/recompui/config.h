@@ -72,6 +72,7 @@ namespace recompui {
                 inline const std::string fov_scale = "fov_scale";
                 inline const std::string far_scale = "far_scale";
                 inline const std::string fog_scale = "fog_scale";
+                inline const std::string engine_hz = "engine_hz";
             }
 
             enum class TextureFiltering {
@@ -86,6 +87,12 @@ namespace recompui {
                 All = 2,
             };
 
+            enum class EngineHz : uint32_t {
+                Original = 0,
+                Sixty = 1,
+                OneTwenty = 2,
+            };
+
             TextureFiltering get_filtering();
             bool get_developer_mode();
             bool get_post_blend_dither();
@@ -94,6 +101,7 @@ namespace recompui {
             double get_fov_scale();
             double get_far_scale();
             double get_fog_scale();
+            EngineHz get_engine_hz();
     
             void update_msaa_supported(bool supported);
             void update_refresh_rate(uint32_t refresh_rate);
