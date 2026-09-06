@@ -264,14 +264,22 @@ namespace RT64 {
         // Unique 60 Hz DLs are presented as-is. RT64 frame-matching is the
         // 30/15 interpolated look the port is leaving. Opt back in only with
         // TUROK2_RT64_INTERPOLATE=1 or the authored-cadence A/B switch.
-        const auto env_on = [](const char* name) {
-            const char* value = std::getenv(name);
-            return value != nullptr && value[0] != '\0' && std::strcmp(value, "0") != 0;
-        };
-        if (!env_on("TUROK2_RT64_INTERPOLATE") && !env_on("TUROK2_AUTHORED_CADENCE")) {
+        static const bool interpolate_on = [] {
+            const auto env_on = [](const char* name) {
+                const char* value = std::getenv(name);
+                return value != nullptr && value[0] != '\0' && std::strcmp(value, "0") != 0;
+            };
+            return env_on("TUROK2_RT64_INTERPOLATE") || env_on("TUROK2_AUTHORED_CADENCE");
+        }();
+        static const bool interpolate_off =
+            [] {
+                const char* value = std::getenv("TUROK2_DISABLE_INTERPOLATION");
+                return value != nullptr && value[0] != '\0' && std::strcmp(value, "0") != 0;
+            }();
+        if (!interpolate_on) {
             workloadConfig.targetRate = 0;
         }
-        if (env_on("TUROK2_DISABLE_INTERPOLATION")) {
+        if (interpolate_off) {
             workloadConfig.targetRate = 0;
         }
 
@@ -1123,6 +1131,8 @@ namespace RT64 {
                         // block. Opt-out: TUROK2_NO_TRI_HOLD=1.
                         static const bool triHoldOff =
                             std::getenv("TUROK2_NO_TRI_HOLD") != nullptr;
+                        static const bool triHoldLog =
+                            std::getenv("TUROK2_FPS_DIAGNOSTICS") != nullptr;
                         uint32_t worldTris = 0;
                         if (fbPair.hasSceneProjection()) {
                             for (uint32_t p = 0; p < fbPair.projectionCount; p++) {
@@ -1158,7 +1168,7 @@ namespace RT64 {
                             runningAvg = (scenePairs == 1)
                                 ? double(worldTris)
                                 : (runningAvg * 0.95 + double(worldTris) * 0.05);
-                            if (holdCollapse) {
+                            if (holdCollapse && triHoldLog) {
                                 std::fprintf(stderr,
                                     "[tri:hold] streak=%u tris=%u avg=%.0f color=%08X\n",
                                     collapseStreak, worldTris, runningAvg,

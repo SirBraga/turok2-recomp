@@ -498,7 +498,8 @@ void renderer::RT64Context::send_dl(const OSTask* task) {
     app->userConfig.refreshRateTarget = 60;
     app->state->setRefreshRate(static_cast<uint16_t>(source_hz));
 
-    if (std::getenv("TUROK2_FPS_DIAGNOSTICS") != nullptr) {
+    static const bool fps_diag = std::getenv("TUROK2_FPS_DIAGNOSTICS") != nullptr;
+    if (fps_diag) {
         static int32_t lastTicks = -1;
         static uint32_t lastDisplay = 0;
         static uint32_t lastSource = 0;

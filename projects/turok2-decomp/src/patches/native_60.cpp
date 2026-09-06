@@ -38,6 +38,14 @@ static bool env_flag_on(const char* name) {
            std::strcmp(value, "0") != 0;
 }
 
+// Bring-up fprintf on the Update/Draw path. Windows console I/O is
+// expensive enough to drop unique 120 on its own when vis/fog/scene
+// lines fire every frame. TUROK2_FPS_DIAGNOSTICS=1 turns them back on.
+static bool diag_logs() {
+    static const bool on = env_flag_on("TUROK2_FPS_DIAGNOSTICS");
+    return on;
+}
+
 // Menu Graphics → Hz (0 Original, 1=60, 2=120). Env still wins for A/B:
 // TUROK2_AUTHORED_CADENCE=1, TUROK2_UNIQUE_60=1.
 static std::atomic<int> g_menu_engine_hz{2};
@@ -128,9 +136,13 @@ extern "C" void turok2_set_camera_scales(float fov_scale) {
 }
 
 static float camera_fov_scale() {
-    return env_scale_override("TUROK2_FOV_SCALE",
-                              g_fov_scale.load(std::memory_order_relaxed),
-                              1.0f, 1.5f);
+    static const char* const env_text = std::getenv("TUROK2_FOV_SCALE");
+    static const float env_value = env_scale_override("TUROK2_FOV_SCALE",
+                                                      1.0f, 1.0f, 1.5f);
+    if (env_text != nullptr && env_text[0] != '\0') {
+        return env_value;
+    }
+    return g_fov_scale.load(std::memory_order_relaxed);
 }
 
 // RDP gSPFogPosition min. Packed int CCamera.m_FogStart (+0x524) keeps the
@@ -203,11 +215,12 @@ extern "C" void turok2_patch_native_60(uint8_t* rdram, recomp_context* ctx) {
 
 // Authored time is 15 increment-units per real second (gameplay 0.5 at
 // 30 Hz, cinema 1.0 at 15 Hz, unique 60 = 0.25, unique 120 = 0.125).
-// A fixed 0.125 assumes every VI becomes an Update. If leftover/camera
-// work drops the engine to ~60 Updates while increment stays 0.125, the
-// whole game runs at half speed — the Graphics Hz regression. Step from
-// wall-clock dt so 120 unique frames stay real-time when they land, and
-// missed VIs take a larger step instead of going slow-motion.
+// A fixed 0.125 assumes every VI becomes an Update. Failed flicker
+// experiments (force every section past AABB, force vis AND, inflate
+// ViewMin by far*0.55) plus un-gated stderr on the Draw path dropped
+// many machines to ~60 Updates. Increment then stayed 0.125 and the
+// world ran at half speed. Those forces are off; step from wall-clock
+// dt so a missed VI still keeps authored time instead of slow-motion.
 static constexpr float kAuthoredUnitsPerSecond = 15.0f;
 static constexpr float kMaxIncrementDt = 0.05f;
 static constexpr float kMinIncrementDt = 1.0f / 240.0f;
@@ -272,7 +285,8 @@ static void apply_native_increment(uint8_t* rdram) {
         announced = true;
         std::fprintf(stderr,
             "[fps:engine] unique120 increment=wall-clock*15 "
-            "nominal=0.125 vi=120 ai=60 interp=off\n");
+            "nominal=0.125 vi=120 ai=60 interp=off "
+            "sec-force=off vis-force=off\n");
     }
 }
 
@@ -289,7 +303,7 @@ extern "C" void turok2_patch_lock_increment(uint8_t* rdram, recomp_context* ctx)
     const int32_t ticks = std::clamp<int32_t>(MEM_W(kNextTicks, 0), 1, 12);
     const float increment = load_f32(rdram, kFrameIncrement);
 
-    if (std::getenv("TUROK2_FPS_DIAGNOSTICS") != nullptr) {
+    if (diag_logs()) {
         using Clock = std::chrono::steady_clock;
         static auto interval_start = Clock::now();
         static uint64_t updates = 0;
@@ -435,7 +449,7 @@ extern "C" void turok2_patch_scale_swoosh_edge(uint8_t* rdram, recomp_context* c
         seen = g_update_gen;
         adds++;
     }
-    if (std::getenv("TUROK2_FPS_DIAGNOSTICS") != nullptr) {
+    if (diag_logs()) {
         using Clock = std::chrono::steady_clock;
         static auto interval_start = Clock::now();
         const auto now = Clock::now();
@@ -1082,7 +1096,7 @@ static void publish_view(uint8_t* rdram, uint32_t camera) {
         return;
     }
     prev = snap;
-    if (g_cinema) {
+    if (g_cinema || !diag_logs()) {
         return;
     }
     std::fprintf(stderr,
@@ -1524,6 +1538,9 @@ static void note_guest_world_sections(uint8_t* rdram) {
     // skips the entire world loop when this is <= 0. Read here after the
     // previous Draw so we do not depend on RT64.
     // CScene is embedded at GameApp+0x3C8, not a pointer.
+    if (!diag_logs()) {
+        return;
+    }
     constexpr uint32_t kScene = 0x800F6CB0u + 0x3C8u;
     const int32_t nsec = static_cast<int32_t>(MEM_W(static_cast<int32_t>(kScene + 0x14A8u), 0));
     static uint64_t frames = 0;
@@ -1659,7 +1676,7 @@ static void cinema_fill_note(uint8_t* rdram, uint32_t camera) {
     const bool changed = !primed || fog != prev_fog || preg != prev_preg ||
                          vis != prev_vis || sky != prev_sky;
     const bool beat = ((n++ & 31u) == 0u);
-    if (!changed && !beat) {
+    if (!diag_logs() || (!changed && !beat)) {
         return;
     }
     primed = true;
@@ -1690,6 +1707,10 @@ static void cinema_hold_cut(uint8_t* rdram, uint32_t camera, uint32_t mtx,
                      disabled ? "off" : "on", dist);
     }
 
+    if (disabled) {
+        return;
+    }
+
     CinemaHold* slot = cinema_hold_slot(camera);
     float dx = 0.0f;
     float dy = 0.0f;
@@ -1713,7 +1734,7 @@ static void cinema_hold_cut(uint8_t* rdram, uint32_t camera, uint32_t mtx,
     static uint64_t frames = 0;
     static uint64_t holds = 0;
     const bool heartbeat = ((frames++ & 63u) == 0u);
-    if (heartbeat) {
+    if (heartbeat && diag_logs()) {
         const uint32_t skip = g_turok2_lsb_skip_acc.exchange(0, std::memory_order_relaxed);
         const uint32_t rebuild = g_turok2_lsb_rebuild_acc.exchange(0, std::memory_order_relaxed);
         std::fprintf(stderr,
@@ -1728,17 +1749,22 @@ static void cinema_hold_cut(uint8_t* rdram, uint32_t camera, uint32_t mtx,
         store_f32(rdram, static_cast<int32_t>(camera + 0x03Cu), slot->good[13]);
         store_f32(rdram, static_cast<int32_t>(camera + 0x040u), slot->good[14]);
         holds++;
-        std::fprintf(stderr,
-            "[cin:hold] cam=%08X from=(%.1f,%.1f,%.1f) d=(%.1f,%.1f,%.1f) "
-            "dot=%.2f fog=%06X n=%llu\n",
-            camera, px, py, pz, dx, dy, dz, look_dot, fog,
-            static_cast<unsigned long long>(holds));
+        if (diag_logs()) {
+            std::fprintf(stderr,
+                "[cin:hold] cam=%08X from=(%.1f,%.1f,%.1f) d=(%.1f,%.1f,%.1f) "
+                "dot=%.2f fog=%06X n=%llu\n",
+                camera, px, py, pz, dx, dy, dz, look_dot, fog,
+                static_cast<unsigned long long>(holds));
+        }
         return;
     }
 
     load_mtx16(rdram, mtx, slot->good);
     slot->primed = true;
     if (!jump && !heartbeat) {
+        return;
+    }
+    if (!diag_logs()) {
         return;
     }
     std::fprintf(stderr,
@@ -2010,7 +2036,7 @@ extern "C" void turok2_patch_cinema_region(uint8_t* rdram, recomp_context* ctx) 
     // 3D there. Isolated 3D NULLs were 1-2 pairs. Keep the last pointer
     // for at most two Draws, then let a real NULL through.
     if (valid) {
-        if (slot->last != 0u && incoming != slot->last) {
+        if (diag_logs() && slot->last != 0u && incoming != slot->last) {
             std::fprintf(stderr,
                 "[cin:region] SWITCH cam=%08X from=%08X to=%08X\n",
                 camera, slot->last, incoming);
@@ -2022,12 +2048,14 @@ extern "C" void turok2_patch_cinema_region(uint8_t* rdram, recomp_context* ctx) 
     slot->held++;
     if (!disabled && slot->last != 0u && slot->held <= 2u) {
         ctx->r2 = static_cast<int32_t>(slot->last);
-        std::fprintf(stderr, "[cin:region] KEEP cam=%08X last=%08X n=%u\n",
-                     camera, slot->last, slot->held);
+        if (diag_logs()) {
+            std::fprintf(stderr, "[cin:region] KEEP cam=%08X last=%08X n=%u\n",
+                         camera, slot->last, slot->held);
+        }
         return;
     }
     static uint64_t nulls = 0;
-    if ((nulls++ & 63u) == 0u) {
+    if (diag_logs() && ((nulls++ & 63u) == 0u)) {
         std::fprintf(stderr, "[cin:region] NULL cam=%08X last=%08X n=%llu\n",
                      camera, slot->last, static_cast<unsigned long long>(nulls));
     }
@@ -2152,7 +2180,7 @@ extern "C" void turok2_patch_widen_camera_culling(uint8_t* rdram,
     }
 
     static uint64_t calls = 0;
-    if ((calls++ & 255u) == 0u) {
+    if (diag_logs() && ((calls++ & 255u) == 0u)) {
         std::fprintf(stderr,
             "[wide:cull] camera=%08X scale=%.3f origin=(%.1f,%.1f,%.1f)\n",
             camera, scale, corners[0].x, corners[0].y, corners[0].z);
@@ -2197,6 +2225,14 @@ extern "C" void turok2_patch_expand_view_bounds(uint8_t* rdram,
 
     float far_clip = load_f32(rdram, static_cast<int32_t>(camera + 0x510u));
     const int grew = grow_corner_xz(corners, far_clip);
+    // Always-on far*0.55 cube around the eye drew most of the loaded
+    // level even when TCorners were already a normal frustum. Only
+    // rewrite ViewMin/Max / ViewVolume when look-up actually collapsed
+    // the XZ span. TUROK2_VIEW_BOUNDS_CUBE=1 restores the old inflate.
+    static const bool always_cube = env_flag_on("TUROK2_VIEW_BOUNDS_CUBE");
+    if (grew == 0 && !always_cube) {
+        return;
+    }
     if (!std::isfinite(far_clip) || far_clip < 64.0f) {
         far_clip = 2048.0f;
     }
@@ -2255,7 +2291,7 @@ extern "C" void turok2_patch_expand_view_bounds(uint8_t* rdram,
     }
 
     static uint64_t calls = 0;
-    if ((calls++ & 255u) == 0u) {
+    if (diag_logs() && ((calls++ & 255u) == 0u)) {
         std::fprintf(stderr,
             "[view:aabb] cam=%08X grow=%d "
             "min=(%.1f,%.1f,%.1f) max=(%.1f,%.1f,%.1f)\n",
@@ -2287,13 +2323,15 @@ extern "C" void turok2_patch_world_draw_gate(uint8_t* rdram,
     }
     (*streak)++;
     if (disabled || *streak > 2u) {
-        if (((*streak) & 31u) == 1u) {
+        if (diag_logs() && (((*streak) & 31u) == 1u)) {
             std::fprintf(stderr, "[scene:gate] %s n=%u keep\n", tag, *streak);
         }
         return;
     }
     ctx->r2 = 0;
-    std::fprintf(stderr, "[scene:gate] %s n=%u FORCE\n", tag, *streak);
+    if (diag_logs()) {
+        std::fprintf(stderr, "[scene:gate] %s n=%u FORCE\n", tag, *streak);
+    }
 }
 
 extern "C" void func_002216DC(uint8_t* rdram, recomp_context* ctx);
@@ -2314,12 +2352,12 @@ extern "C" void turok2_patch_scene_draw_emit(uint8_t* rdram,
 }
 
 extern "C" int turok2_scene_force_sec(void) {
-    // Draw culls the Load list against ViewMin/Max. Those boxes
-    // do not match (Load uses AnimMin). nsec>0 + vispass=0 +
-    // emits=0 means every listed section failed the Draw AABB.
-    // Opt-out: TUROK2_NO_SEC_AABB=1.
-    static const bool disabled = env_flag_on("TUROK2_NO_SEC_AABB");
-    return disabled ? 0 : 1;
+    // Failed Adon/stairs experiment: skip the Draw AABB so every
+    // Load-list section is processed. That drew most of the loaded
+    // level at unique 120 and is why a 1660 Ti felt "heavy". Off
+    // unless TUROK2_FORCE_SEC=1. TUROK2_NO_SEC_AABB=1 stays a no-op.
+    static const bool enabled = env_flag_on("TUROK2_FORCE_SEC");
+    return enabled ? 1 : 0;
 }
 
 extern "C" void turok2_patch_scene_sec_try(uint8_t* rdram,
@@ -2331,14 +2369,13 @@ extern "C" void turok2_patch_scene_sec_try(uint8_t* rdram,
 
 extern "C" void turok2_patch_scene_vis_pass(uint8_t* rdram,
                                            recomp_context* ctx) {
-    // Geo AND at 0x002225D4 and instance AND at 0x00222608.
-    // Stack masks never dropped (vis-hold force=0). A geo without
-    // bit 4, or instance+0x84 == 0, still skips every emit and
-    // leaves the fog fill with nsec > 0. Force the AND result
-    // through. Opt-out: TUROK2_NO_VIS_PASS=1.
+    // Failed flicker experiment: force a zero geo/instance vis AND
+    // so culled objects still emit. Combined with force_sec that
+    // submitted far more RSP/RDP work than the N64. Off unless
+    // TUROK2_FORCE_VIS_PASS=1. TUROK2_NO_VIS_PASS=1 stays a no-op.
     (void)rdram;
-    static const bool disabled = env_flag_on("TUROK2_NO_VIS_PASS");
-    if (disabled || ctx->r2 != 0) {
+    static const bool enabled = env_flag_on("TUROK2_FORCE_VIS_PASS");
+    if (!enabled || ctx->r2 != 0) {
         return;
     }
     ctx->r2 = 1;
@@ -2462,9 +2499,9 @@ extern "C" void turok2_patch_scene_draw_note(uint8_t* rdram,
     const bool cinema = g_cinema;
     calls++;
     g_scene_last_nsec = sections;
-    if (forced || empty || tiny || reloaded || miss ||
+    if (diag_logs() && (forced || empty || tiny || reloaded || miss ||
         (cinema && ((calls & 31u) == 0u)) ||
-        ((calls & 255u) == 0u)) {
+        ((calls & 255u) == 0u))) {
         std::fprintf(stderr,
             "[scene:draw] cam=%08X nsec=%d empty=%llu "
             "spanxz=(%.1f,%.1f) geom=%08X cvis=%08X force=%d "
@@ -2563,7 +2600,7 @@ extern "C" void turok2_patch_sky_layer_corners(uint8_t* rdram,
     }
 
     static uint64_t calls = 0;
-    if ((calls++ & 255u) == 0u) {
+    if (diag_logs() && ((calls++ & 255u) == 0u)) {
         std::fprintf(stderr,
             "[sky:cover] cam=%08X span=%.1f far=%.1f snap=%d grow=%d\n",
             camera, span, far_clip, snap != nullptr ? 1 : 0, grew);
@@ -2607,7 +2644,7 @@ extern "C" void turok2_patch_fog_position(uint8_t* rdram, recomp_context* ctx) {
     const bool spike = authored > 996u;
     const bool changed = authored != last_in;
     last_in = authored;
-    if (spike || changed || ((calls++ & 255u) == 0u)) {
+    if (diag_logs() && (spike || changed || ((calls++ & 255u) == 0u))) {
         std::fprintf(stderr, "[fog:pos] min %u -> %u scale=%.3f%s\n",
                      authored, min, kFogDistanceScale,
                      spike ? " WRAP" : "");
