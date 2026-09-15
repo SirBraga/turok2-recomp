@@ -19,13 +19,30 @@
 #include <unistd.h>
 #else
 // GetCurrentThreadId, for the window handle RT64 expects on Windows.
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
 #include <windows.h>
+#ifdef min
+#undef min
+#endif
+#ifdef max
+#undef max
+#endif
+#ifdef near
+#undef near
+#endif
+#ifdef far
+#undef far
+#endif
 #endif
 
 #define SDL_MAIN_HANDLED
-#include <SDL2/SDL.h>
-#include <SDL2/SDL_syswm.h>
+#include <SDL.h>
+#include <SDL_syswm.h>
 
 #include "librecomp/game.hpp"
 #include "librecomp/mods.hpp"
@@ -1604,10 +1621,11 @@ int main(int argc, char** argv) {
         .has_compressed_code = false,
         .entrypoint_address = get_entrypoint_address(),
         .entrypoint = recomp_entrypoint,
-        .on_init_callback = turok2_on_init,
+        // Declaration order matters for MSVC designated initializers.
         // Every game thread starts from a fresh context that defaults to FR = 0,
         // so the FR bit has to be raised again for each one.
         .thread_create_callback = turok2_on_thread_create,
+        .on_init_callback = turok2_on_init,
     };
     supported_games.emplace_back(game);
     recomp::register_game(supported_games.front());

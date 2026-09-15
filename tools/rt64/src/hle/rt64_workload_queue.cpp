@@ -264,14 +264,22 @@ namespace RT64 {
         // Unique 60 Hz DLs are presented as-is. RT64 frame-matching is the
         // 30/15 interpolated look the port is leaving. Opt back in only with
         // TUROK2_RT64_INTERPOLATE=1 or the authored-cadence A/B switch.
-        const auto env_on = [](const char* name) {
-            const char* value = std::getenv(name);
-            return value != nullptr && value[0] != '\0' && std::strcmp(value, "0") != 0;
-        };
-        if (!env_on("TUROK2_RT64_INTERPOLATE") && !env_on("TUROK2_AUTHORED_CADENCE")) {
+        static const bool interpolate_on = [] {
+            const auto env_on = [](const char* name) {
+                const char* value = std::getenv(name);
+                return value != nullptr && value[0] != '\0' && std::strcmp(value, "0") != 0;
+            };
+            return env_on("TUROK2_RT64_INTERPOLATE") || env_on("TUROK2_AUTHORED_CADENCE");
+        }();
+        static const bool interpolate_off =
+            [] {
+                const char* value = std::getenv("TUROK2_DISABLE_INTERPOLATION");
+                return value != nullptr && value[0] != '\0' && std::strcmp(value, "0") != 0;
+            }();
+        if (!interpolate_on) {
             workloadConfig.targetRate = 0;
         }
-        if (env_on("TUROK2_DISABLE_INTERPOLATION")) {
+        if (interpolate_off) {
             workloadConfig.targetRate = 0;
         }
 
@@ -987,7 +995,11 @@ namespace RT64 {
                     colorSet.clear();
                     std::unordered_set<uint32_t> blockedByFullScreenFill;
                     static uint32_t interpolationPairDiagnosticWorkloads = 0;
-                    const bool printInterpolationPairs = (std::getenv("TUROK2_INTERPOLATION_DIAGNOSTICS") != nullptr) &&
+                    static const bool interpolationDiag =
+                        std::getenv("TUROK2_INTERPOLATION_DIAGNOSTICS") != nullptr;
+                    static const bool pairTrace =
+                        std::getenv("TUROK2_PAIR_TRACE") != nullptr;
+                    const bool printInterpolationPairs = interpolationDiag &&
                         (interpolationPairDiagnosticWorkloads < 20);
                     for (int32_t f = workload.fbPairCount - 1; f >= 0; f--) {
                         const FramebufferPair &fbPair = workload.fbPairs[f];
@@ -1060,7 +1072,7 @@ namespace RT64 {
                         // Logged before the skip below: a pair whose geometry was
                         // submitted but rasterized nothing has an empty color
                         // rect, and every trace so far discarded exactly those.
-                        if (std::getenv("TUROK2_PAIR_TRACE") != nullptr) {
+                        if (pairTrace) {
                             // Count rectangle draws that cover the colour image.
                             // A frame-counter driven full-screen overlay laid on
                             // top of a normal scene is what makes a healthy frame
@@ -1115,16 +1127,23 @@ namespace RT64 {
                             blockedByFullScreenFill.insert(colorImg.address);
                         }
 
-                        // Isolated Adon / stairs flats: the CPU list is populated
-                        // and func_002152AC still runs, but this pair's 3D tris
-                        // collapse to sky/letterbox/fill. SkipBuffering would
-                        // scan that out. Hold the last swapchain for at most two
-                        // workloads; a longer streak is an authored cut / 2D
-                        // block. Opt-out: TUROK2_NO_TRI_HOLD=1.
-                        static const bool triHoldOff =
-                            std::getenv("TUROK2_NO_TRI_HOLD") != nullptr;
+                        // Isolated Adon / stairs flats: walk every 3D call to
+                        // count tris, then hold the swapchain. Failed the
+                        // eye-test and costs a full projection walk per pair
+                        // at unique 120. Off unless TUROK2_TRI_HOLD=1.
+                        static const bool triHoldOn = [] {
+                            const char *value = std::getenv("TUROK2_TRI_HOLD");
+                            return value != nullptr && value[0] != '\0' &&
+                                   std::strcmp(value, "0") != 0;
+                        }();
+                        static const bool triHoldLog =
+                            std::getenv("TUROK2_FPS_DIAGNOSTICS") != nullptr;
                         uint32_t worldTris = 0;
-                        if (fbPair.hasSceneProjection()) {
+                        static uint64_t scenePairs = 0;
+                        static double runningAvg = 0.0;
+                        static uint32_t collapseStreak = 0;
+                        bool holdCollapse = false;
+                        if (triHoldOn && fbPair.hasSceneProjection()) {
                             for (uint32_t p = 0; p < fbPair.projectionCount; p++) {
                                 const Projection &proj = fbPair.projections[p];
                                 if ((proj.type != Projection::Type::Perspective) &&
@@ -1136,11 +1155,7 @@ namespace RT64 {
                                 }
                             }
                         }
-                        static uint64_t scenePairs = 0;
-                        static double runningAvg = 0.0;
-                        static uint32_t collapseStreak = 0;
-                        bool holdCollapse = false;
-                        if (fbPair.hasSceneProjection()) {
+                        if (triHoldOn && fbPair.hasSceneProjection()) {
                             scenePairs++;
                             const bool collapsed =
                                 (scenePairs > 45) &&
@@ -1153,12 +1168,11 @@ namespace RT64 {
                             else {
                                 collapseStreak = 0;
                             }
-                            holdCollapse = !triHoldOff && collapsed &&
-                                           (collapseStreak <= 2);
+                            holdCollapse = collapsed && (collapseStreak <= 2);
                             runningAvg = (scenePairs == 1)
                                 ? double(worldTris)
                                 : (runningAvg * 0.95 + double(worldTris) * 0.05);
-                            if (holdCollapse) {
+                            if (holdCollapse && triHoldLog) {
                                 std::fprintf(stderr,
                                     "[tri:hold] streak=%u tris=%u avg=%.0f color=%08X\n",
                                     collapseStreak, worldTris, runningAvg,
@@ -1184,7 +1198,7 @@ namespace RT64 {
                         // Ground truth for what the game submitted, independent of
                         // any present-side reasoning. Uncapped, unlike the
                         // interpolation pair print above.
-                        if (std::getenv("TUROK2_PAIR_TRACE") != nullptr) {
+                        if (pairTrace) {
                             std::fprintf(stderr,
                                 "[pair] color=%08X pair=%d/%u calls=%u scene=%d fillRectOnly=%d fullFill=%d newest=%d\n",
                                 colorImg.address, f, workload.fbPairCount,

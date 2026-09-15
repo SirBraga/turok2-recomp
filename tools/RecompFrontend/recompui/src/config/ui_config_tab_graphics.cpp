@@ -388,7 +388,7 @@ namespace recompui {
                 "<br />"
                 "<recomp-color primary>Note: This option won't be available if your GPU does not support programmable MSAA sample positions, as it is currently required to avoid rendering glitches.</recomp-color>",
                 antialiasing_options,
-                ultramodern::renderer::Antialiasing::MSAA2X
+                ultramodern::renderer::Antialiasing::None
             );
 
             config.add_enum_option(

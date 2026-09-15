@@ -11,6 +11,10 @@
 #include <iomanip>
 
 #if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
 #include <Shlobj.h>
 #elif defined(__linux__)
 #include <unistd.h>
@@ -63,6 +67,18 @@ namespace recompui {
         if (std::filesystem::exists("portable.txt")) {
             return std::filesystem::current_path();
         }
+
+#if defined(_WIN32)
+        // Explorer shortcuts and "Open with" can leave cwd somewhere else.
+        // A portable.txt next to the exe still wins in that case.
+        {
+            const std::filesystem::path program_dir = file::get_program_path();
+            if (!program_dir.empty() &&
+                std::filesystem::exists(program_dir / "portable.txt")) {
+                return program_dir;
+            }
+        }
+#endif
 
 #if defined(__APPLE__)
         // Check for portable file in the directory containing the app bundle.
@@ -117,6 +133,13 @@ namespace recompui {
     std::filesystem::path file::get_program_path() {
 #if defined(__APPLE__)
         return file::apple::get_bundle_resource_directory();
+#elif defined(_WIN32)
+        wchar_t module_path[MAX_PATH];
+        const DWORD length = GetModuleFileNameW(nullptr, module_path, MAX_PATH);
+        if (length > 0 && length < MAX_PATH) {
+            return std::filesystem::path{module_path}.parent_path();
+        }
+        return std::filesystem::current_path();
 #elif defined(__linux__) && defined(RECOMP_FLATPAK)
         return "/app/bin";
 #else

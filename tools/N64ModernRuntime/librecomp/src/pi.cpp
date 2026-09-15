@@ -1,6 +1,7 @@
 #include <memory>
 #include <fstream>
 #include <array>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <mutex>
@@ -68,7 +69,7 @@ void recomp::do_rom_read(uint8_t* rdram, gpr ram_address, uint32_t physical_addr
         fprintf(stderr,
             "Invalid ROM DMA: physical=0x%08X ram=0x%016llX size=0x%zX rom_size=0x%zX\n",
             physical_addr, static_cast<unsigned long long>(ram_address), num_bytes, rom.size());
-        __builtin_trap();
+        std::abort();
     }
 
     // TODO handle misaligned DMA
