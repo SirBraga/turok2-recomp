@@ -1556,7 +1556,8 @@ static void note_guest_world_sections(uint8_t* rdram) {
     avg = (frames == 1) ? static_cast<double>(nsec) : (avg * 0.95 + static_cast<double>(nsec) * 0.05);
     const bool empty = nsec <= 0;
     const bool collapsed = have_avg && (nsec < avg * 0.25) && (avg > 4.0);
-    if (empty || collapsed || ((frames & 255u) == 0u)) {
+    static const bool scene_trace = env_flag_on("TUROK2_SCENE_TRACE");
+    if (scene_trace && (empty || collapsed || ((frames & 255u) == 0u))) {
         std::fprintf(stderr,
             "[scene:nsec] %s n=%llu nsec=%d avg=%.1f empty=%llu\n",
             empty ? "EMPTY" : (collapsed ? "DROP" : "hb"),
@@ -2201,8 +2202,8 @@ extern "C" void turok2_patch_expand_view_bounds(uint8_t* rdram,
     // the world for one frame — not the sky card. Expand the cull
     // box around the eye and rebuild the volume from a grown XZ
     // copy, then put TCorners back so sky still uses the snapshot.
-    // Opt-out: TUROK2_NO_VIEW_BOUNDS=1.
-    static const bool disabled = env_flag_on("TUROK2_NO_VIEW_BOUNDS");
+    // Failed as the Adon/void fix. Opt-in: TUROK2_VIEW_BOUNDS=1.
+    static const bool disabled = !env_flag_on("TUROK2_VIEW_BOUNDS");
     if (disabled) {
         return;
     }
@@ -2310,9 +2311,9 @@ extern "C" void turok2_patch_world_draw_gate(uint8_t* rdram,
     //    func_0027E770 entirely (no [scene:draw]).
     // Isolated 1–2 Draw spikes are the Adon / stairs flats. A long
     // streak is the authored 2D Primagen block — let that through.
-    // Opt-out: TUROK2_NO_FORCE_WORLD=1.
+    // Failed eye-test. Opt-in: TUROK2_FORCE_WORLD=1.
     (void)rdram;
-    static const bool disabled = env_flag_on("TUROK2_NO_FORCE_WORLD");
+    static const bool disabled = !env_flag_on("TUROK2_FORCE_WORLD");
     const uint32_t pool = static_cast<uint32_t>(ctx->r18);
     const bool pool_site = (pool == kCamPool);
     static uint32_t streak_alt = 0;
@@ -2345,6 +2346,41 @@ static int32_t g_scene_last_nsec = 0;
 static uint64_t g_scene_last_emits = 0;
 static uint64_t g_scene_last_vis_pass = 0;
 static uint64_t g_scene_last_sec_try = 0;
+
+extern "C" int turok2_skip_cache_advance(void) {
+    // T3 CEngineApp__Update calls CCache__Advance once per Update
+    // (references/turok3/src/us/tengine.c). T2 is func_00204DE0,
+    // jal from 0x00288084. It decrements SetSyncCount, increments
+    // the age word at 0x800D8DF0, then evicts up to 10 CMemEntry
+    // via func_00203330. Unique 120 runs that 4× per authored
+    // frame. Holding Advance crashed F7 in func_00203330 and
+    // blocked texture decompress. Opt-in:
+    // TUROK2_CACHE_ADVANCE_HOLD=1.
+    static const bool disabled = !env_flag_on("TUROK2_CACHE_ADVANCE_HOLD");
+    static bool noted = false;
+    if (!noted) {
+        noted = true;
+        std::fprintf(stderr,
+            "[turok2:defaults] acclaim=on (RT64, TUROK2_ACCLAIM_LIGHT=0 off) "
+            "cache-hold=off force-sec=off vis-pass=off view-bounds=off "
+            "world-gate=off vis-hold=off tri-hold=off\n");
+    }
+    if (disabled || preserve_authored_cadence()) {
+        return 0;
+    }
+    static LeftoverClock clock;
+    static bool hold_noted = false;
+    if (leftover_step(clock, true)) {
+        return 0;
+    }
+    if (!hold_noted) {
+        hold_noted = true;
+        std::fprintf(stderr,
+            "[cache:advance] leftover hold "
+            "(CCache__Advance / func_00204DE0)\n");
+    }
+    return 1;
+}
 
 extern "C" void turok2_patch_scene_draw_emit(uint8_t* rdram,
                                             recomp_context* ctx) {
@@ -2467,7 +2503,7 @@ extern "C" void turok2_patch_scene_draw_note(uint8_t* rdram,
             static_cast<int32_t>(saved_head);
     }
 
-    static const bool vis_off = env_flag_on("TUROK2_NO_VIS_HOLD");
+    static const bool vis_off = !env_flag_on("TUROK2_VIS_HOLD");
     static uint32_t last_geom = 0xFFFFFFFFu;
     static uint32_t last_cvis = 0xFFFFFFFFu;
     uint32_t geom = static_cast<uint32_t>(MEM_W(0X18, ctx->r29));
@@ -2501,9 +2537,17 @@ extern "C" void turok2_patch_scene_draw_note(uint8_t* rdram,
     const bool cinema = g_cinema;
     calls++;
     g_scene_last_nsec = sections;
-    if (diag_logs() && (forced || empty || tiny || reloaded || miss ||
+    static const bool scene_trace = env_flag_on("TUROK2_SCENE_TRACE");
+    static bool miss_logged = false;
+    const bool miss_edge = miss && !miss_logged;
+    miss_logged = miss;
+    // Unthrottled MISS prints stall unique 120 if the tty is visible.
+    // First frame of a MISS streak always logs so CMemEntry is visible.
+    const bool interesting = forced || empty || tiny || reloaded || miss ||
+        miss_edge ||
         (cinema && ((calls & 31u) == 0u)) ||
-        ((calls & 255u) == 0u))) {
+        ((calls & 255u) == 0u);
+    if (interesting && (scene_trace || miss_edge || ((calls & 63u) == 0u))) {
         std::fprintf(stderr,
             "[scene:draw] cam=%08X nsec=%d empty=%llu "
             "spanxz=(%.1f,%.1f) geom=%08X cvis=%08X force=%d "
@@ -2517,6 +2561,56 @@ extern "C" void turok2_patch_scene_draw_note(uint8_t* rdram,
             static_cast<unsigned long long>(g_scene_last_vis_pass),
             static_cast<unsigned long long>(g_scene_last_sec_try),
             miss ? " MISS" : "");
+    }
+    // CActiveGridSection / CMemEntry as in LibTEngine T2 + T3 cache.h.
+    // Draw locks DLIST A/B (0x200/0x400) on flags at +0xC (T2).
+    if (miss && (scene_trace || miss_edge || ((calls & 63u) == 0u))) {
+        const uint32_t slot = scene + 0x14ACu;
+        const uint32_t pme =
+            static_cast<uint32_t>(MEM_W(static_cast<int32_t>(slot), 0));
+        const uint32_t bounds =
+            static_cast<uint32_t>(MEM_W(static_cast<int32_t>(slot + 4u), 0));
+        uint32_t data = 0;
+        uint32_t size = 0;
+        uint32_t lock = 0;
+        uint32_t flags = 0;
+        int32_t ninst = -1;
+        if (guest_kseg0(pme)) {
+            data = static_cast<uint32_t>(
+                MEM_W(static_cast<int32_t>(pme), 0));
+            size = static_cast<uint32_t>(
+                MEM_W(static_cast<int32_t>(pme + 4u), 0));
+            lock = static_cast<uint32_t>(
+                MEM_W(static_cast<int32_t>(pme + 8u), 0));
+            flags = static_cast<uint32_t>(
+                MEM_W(static_cast<int32_t>(pme + 0xCu), 0));
+            if (guest_kseg0(data)) {
+                const uint32_t off0 = static_cast<uint32_t>(
+                    MEM_W(static_cast<int32_t>(data + 4u), 0));
+                const uint32_t blk = data + off0;
+                if (guest_kseg0(blk)) {
+                    ninst = static_cast<int32_t>(
+                        MEM_W(static_cast<int32_t>(blk + 4u), 0));
+                }
+            }
+        }
+        uint32_t rvis = 0;
+        if (guest_kseg0(preg)) {
+            rvis = static_cast<uint32_t>(
+                MEM_W(static_cast<int32_t>(preg + 0xCu), 0));
+        }
+        const uint32_t dlist = static_cast<uint32_t>(
+            MEM_W(static_cast<int32_t>(0x800D8218), 0));
+        const uint32_t dv0 = static_cast<uint32_t>(
+            MEM_W(static_cast<int32_t>(0x800D8208), 0));
+        const uint32_t dv1 = static_cast<uint32_t>(
+            MEM_W(static_cast<int32_t>(0x800D820C), 0));
+        std::fprintf(stderr,
+            "[scene:pme] pme=%08X data=%08X size=%u lock=%u flags=%08X "
+            "ninst=%d bounds=%08X preg=%08X rvis=%08X "
+            "dlist=%u valid=%u/%u\n",
+            pme, data, size, lock, flags, ninst, bounds, preg, rvis,
+            dlist, dv0, dv1);
     }
 }
 
@@ -3149,9 +3243,47 @@ extern "C" void turok2_patch_direct_mouse_look(uint8_t* rdram, recomp_context* c
     static uint32_t pitch_player_addr = 0;
     static float native_pitch = 0.0f;
     static bool native_pitch_active = false;
+    static float last_eye[3] = {0.0f, 0.0f, 0.0f};
+    static bool have_eye = false;
+    bool warp_or_teleport = false;
+    if (valid) {
+        const uint32_t camera =
+            static_cast<uint32_t>(MEM_W(0x51C, player_addr));
+        if (guest_kseg0(camera) && camera < 0x80800000u) {
+            const int32_t warp_mode = MEM_W(0xF0, camera);
+            const float ex = load_f32(rdram, static_cast<int32_t>(camera + 0x114u));
+            const float ey = load_f32(rdram, static_cast<int32_t>(camera + 0x118u));
+            const float ez = load_f32(rdram, static_cast<int32_t>(camera + 0x11Cu));
+            if (warp_mode != 0) {
+                warp_or_teleport = true;
+            } else if (have_eye &&
+                       std::isfinite(ex) && std::isfinite(ey) && std::isfinite(ez)) {
+                const float jx = ex - last_eye[0];
+                const float jy = ey - last_eye[1];
+                const float jz = ez - last_eye[2];
+                warp_or_teleport = (jx * jx + jy * jy + jz * jz) > (80.0f * 80.0f);
+            }
+            if (std::isfinite(ex) && std::isfinite(ey) && std::isfinite(ez)) {
+                last_eye[0] = ex;
+                last_eye[1] = ey;
+                last_eye[2] = ez;
+                have_eye = true;
+            }
+        }
+    }
+    if (warp_or_teleport) {
+        // Portal / warp already wrote the new HeadRot this Update. Holding
+        // the pre-warp native pitch leaves the body at the destination and
+        // the look at the previous room.
+        native_pitch_active = false;
+        pitch_player_addr = 0;
+    }
     if (!captured || !valid) {
         native_pitch_active = false;
         pitch_player_addr = 0;
+        return;
+    }
+    if (warp_or_teleport) {
         return;
     }
 

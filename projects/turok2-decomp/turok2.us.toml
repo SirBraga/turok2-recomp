@@ -1056,6 +1056,22 @@ text = """
     turok2_patch_relock_increment(rdram, ctx);
 """
 
+# T3 CCache__Advance (tengine.c, after gFrameIncrement). T2 is
+# func_00204DE0: countdown at gCache+0xC08, age++ at +0xC0C, then
+# up to 10 func_00203330 evicts. Unique 120 ages the grid LRU 4×.
+# Same leftover as 0x6D20. Opt-out: TUROK2_NO_CACHE_ADVANCE_HOLD=1.
+[[patches.hook]]
+func = "func_00204DE0"
+before_vram = 0x00204DE0
+text = """
+    {
+        extern int turok2_skip_cache_advance(void);
+        if (turok2_skip_cache_advance()) {
+            return;
+        }
+    }
+"""
+
 # CAI.m_FreezeTime is an integer 15 Hz countdown that also zeros increment.
 [[patches.hook]]
 func = "func_00245848"

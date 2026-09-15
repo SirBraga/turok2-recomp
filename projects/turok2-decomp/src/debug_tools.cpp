@@ -127,15 +127,39 @@ std::string status_copy() {
 }
 
 void skip_cinema(uint8_t* rdram) {
+    // CCinemaPlayer at *0x800C1BB0. PathPlaying (func_00284188) is
+    // playing(+0x38) && pathBegin(+0x30) <= currentTime(+0x1C) <= pathEnd(+0x34).
+    // Writing currentTime = pathEnd+1 only leaves that window; the engine
+    // starts the next shot and JUMPS the camera (live 2026-09-06: mash P
+    // landed at origin Y=-351 in the Adia water, HUD up, no FPS arms,
+    // Draw still on path cam 806FF120).
+    //
+    // Authored Start skip is func_002840EC: cinema+0x60=1, +0x64=fade.
+    // func_00283CD4 then expires the timer and runs func_00284468(1) +
+    // func_002844F0, which clear playing and run the end/spawn callbacks.
     const uint32_t object = MEM_W(static_cast<int32_t>(kCinemaObjectPtr), 0);
     if ((object < 0x80000000u) || (object >= 0x80800000u)) {
         return;
     }
+    const uint32_t playing = MEM_W(static_cast<int32_t>(object + 0x38u), 0);
+    const uint32_t skip_armed = MEM_W(static_cast<int32_t>(object + 0x60u), 0);
+    const uint32_t type = MEM_W(static_cast<int32_t>(object + 0xE0u), 0);
+    const float now = load_f32(rdram, object + 0x1Cu);
+    const float begin = load_f32(rdram, object + 0x30u);
     const float end = load_f32(rdram, object + 0x34u);
-    if (!(end > 0.0f) || !(end < 1.0e6f)) {
+    if (playing == 0u) {
+        std::fprintf(stderr, "[debug] skip-cinema idle obj=%08X\n", object);
         return;
     }
-    store_f32(rdram, object + 0x1Cu, end + 1.0f);
+    if (skip_armed != 0u) {
+        std::fprintf(stderr, "[debug] skip-cinema already armed obj=%08X\n", object);
+        return;
+    }
+    MEM_W(static_cast<int32_t>(object + 0x60u), 0) = 1;
+    store_f32(rdram, object + 0x64u, 0.0f);
+    std::fprintf(stderr,
+        "[debug] skip-cinema arm obj=%08X type=%u t=%.3f window=%.3f..%.3f\n",
+        object, type, now, begin, end);
 }
 
 bool write_block(std::ofstream& out, const uint8_t* data, uint32_t size) {
@@ -434,7 +458,8 @@ void refresh_hud() {
 
 void turok2_debug_request_skip() {
     g_want_skip.store(true, std::memory_order_relaxed);
-    g_skip_pulses.store(45, std::memory_order_relaxed);
+    // One Start edge. 45 unique-120 holds skipped many cuts on their own.
+    g_skip_pulses.store(2, std::memory_order_relaxed);
 }
 
 void turok2_debug_request_save() {

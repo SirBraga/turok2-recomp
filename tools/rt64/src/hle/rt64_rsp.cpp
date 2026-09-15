@@ -5,8 +5,10 @@
 #include "rt64_rsp.h"
 
 #include <cassert>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
 #include "../include/rt64_extended_gbi.h"
 #include "common/rt64_common.h"
@@ -23,6 +25,44 @@ namespace RT64 {
     // RSP
 
     constexpr float DepthRange = 1024.0f;
+
+    bool acclaimLightingEnabled() {
+        static const bool enabled = [] {
+            const char *env = std::getenv("TUROK2_ACCLAIM_LIGHT");
+            // Clip-space flashlight + peeked torch block. Off:
+            // TUROK2_ACCLAIM_LIGHT=0. Cache/AABB/vis stream hacks stay off.
+            if (env == nullptr || env[0] == '\0') {
+                return true;
+            }
+            return env[0] != '0';
+        }();
+        return enabled;
+    }
+
+    // GLideN64 applies Acclaim lights AFTER gSPTransformVertex (clip).
+    // The flashlight is uploaded in that space — it walks every frame.
+    static int acclaimSpace() {
+        static const int space = [] {
+            const char *env = std::getenv("TUROK2_ACCLAIM_SPACE");
+            if (env == nullptr || env[0] == '\0') {
+                return 3; // clip
+            }
+            if (std::strcmp(env, "model") == 0) {
+                return 0;
+            }
+            if (std::strcmp(env, "world") == 0) {
+                return 1;
+            }
+            if (std::strcmp(env, "view") == 0) {
+                return 2;
+            }
+            if (std::strcmp(env, "clip") == 0) {
+                return 3;
+            }
+            return 3;
+        }();
+        return space;
+    }
 
     RSP::RSP(State *state) {
         this->state = state;
@@ -78,6 +118,7 @@ namespace RT64 {
         modelViewProjInserted = false;
         lightCount = 0;
         lightsChanged = false;
+        acclaimLights.fill(AcclaimLight{});
         vertexFogIndex = 0;
         vertexLightIndex = 0;
         vertexLightCount = 0;
@@ -683,9 +724,30 @@ namespace RT64 {
             posFloats.emplace_back(v.x);
             posFloats.emplace_back(v.y);
             posFloats.emplace_back(v.z);
-            normColBytes.emplace_back(v.color.r);
-            normColBytes.emplace_back(v.color.g);
-            normColBytes.emplace_back(v.color.b);
+            uint8_t cr = v.color.r;
+            uint8_t cg = v.color.g;
+            uint8_t cb = v.color.b;
+            if (acclaimLightingEnabled() && (geometryMode & G_ACCLAIM_LIGHTING) &&
+                (curGBI != nullptr) && curGBI->flags.acclaimLighting) {
+                const hlslpp::float4 obj(float(v.x), float(v.y), float(v.z), 1.0f);
+                hlslpp::float4 pos = hlslpp::mul(obj, mvp);
+                const int space = acclaimSpace();
+                if (space == 0) {
+                    pos = obj;
+                }
+                else if (space == 1) {
+                    pos = hlslpp::mul(obj, modelMatrixStack[modelMatrixStackSize - 1]);
+                }
+                else if (space == 2) {
+                    pos = hlslpp::mul(obj, hlslpp::mul(
+                        modelMatrixStack[modelMatrixStackSize - 1],
+                        viewMatrixStack[projectionMatrixStackSize - 1]));
+                }
+                applyAcclaimLighting(pos.x, pos.y, pos.z, cr, cg, cb);
+            }
+            normColBytes.emplace_back(cr);
+            normColBytes.emplace_back(cg);
+            normColBytes.emplace_back(cb);
             normColBytes.emplace_back(v.color.a);
             viewProjIndices.emplace_back(curViewProjIndex);
             worldIndices.emplace_back(curTransformIndex);
@@ -936,6 +998,113 @@ namespace RT64 {
         const uint8_t *data = reinterpret_cast<const uint8_t *>(state->fromRDRAM(rdramAddress));
         memcpy(&lights[index], data, sizeof(Light));
         lightsChanged = true;
+    }
+
+    void RSP::setLightAcclaim(int index, uint32_t address) {
+        if ((index < 0) || (index >= int(acclaimLights.size()))) {
+            return;
+        }
+
+        auto decode = [this](uint32_t rdramAddress, AcclaimLight &dst) {
+            AcclaimLightMem mem{};
+            memcpy(&mem, state->fromRDRAM(rdramAddress), sizeof(mem));
+            dst.x = float(mem.x);
+            dst.y = float(mem.y);
+            dst.z = float(mem.z);
+            dst.ca = float(mem.ca);
+            dst.la = float(mem.la) * (1.0f / 65536.0f);
+            dst.r = float(mem.r) / 255.0f;
+            dst.g = float(mem.g) / 255.0f;
+            dst.b = float(mem.b) / 255.0f;
+        };
+        auto plausible = [](const AcclaimLight &light) {
+            return light.ca >= 0.0f && light.ca <= 8192.0f &&
+                light.la > 0.0f && light.la < 1.0f &&
+                light.r >= 0.0f && light.r <= 1.0f &&
+                light.g >= 0.0f && light.g <= 1.0f &&
+                light.b >= 0.0f && light.b <= 1.0f;
+        };
+        auto report = [](int slot, const AcclaimLight &light) {
+            static uint64_t reports = 0;
+            if (std::getenv("TUROK2_ACCLAIM_TRACE") == nullptr) {
+                return;
+            }
+            if (light.ca < 0.0f || reports >= 128) {
+                return;
+            }
+            reports++;
+            std::fprintf(stderr,
+                "[acclaim:light] n=%d pos=(%.0f,%.0f,%.0f) ca=%.0f la=%.5f rgb=(%.2f,%.2f,%.2f)\n",
+                slot, light.x, light.y, light.z, light.ca, light.la, light.r, light.g, light.b);
+        };
+
+        const uint32_t rdramAddress = fromSegmentedMasked(address);
+        AcclaimLight decoded{};
+        decode(rdramAddress, decoded);
+
+        // GLideN64: eight 16-byte lights live in one block. A later
+        // MOVEMEM of the disabled sentinel (ca=-32768) was wiping the
+        // torch slots, so only the flashlight remained and the dungeon
+        // walls (vertex colour 0) went black.
+        if (index == 2) {
+            acclaimLights[2] = decoded;
+            report(2, decoded);
+            for (int extra = 1; extra < 8; extra++) {
+                acclaimLights[2 + extra] = AcclaimLight{};
+                AcclaimLight peeked{};
+                decode(rdramAddress + uint32_t(extra) * 16u, peeked);
+                if (plausible(peeked)) {
+                    acclaimLights[2 + extra] = peeked;
+                    report(2 + extra, peeked);
+                }
+            }
+            return;
+        }
+
+        if (plausible(decoded) || acclaimLights[index].ca < 0.0f) {
+            acclaimLights[index] = decoded;
+            report(index, decoded);
+        }
+    }
+
+    void RSP::applyAcclaimLighting(float vx, float vy, float vz,
+        uint8_t &red, uint8_t &green, uint8_t &blue) const {
+        // GLideN64 gSPPointLightVertexAcclaim. Do not write back into the
+        // RSP vertex cache — that poisoned later draws.
+        float r = float(red) / 255.0f;
+        float g = float(green) / 255.0f;
+        float b = float(blue) / 255.0f;
+        int hits = 0;
+        for (int l = 2; l < 10; l++) {
+            const AcclaimLight &light = acclaimLights[l];
+            if (light.ca < 0.0f) {
+                continue;
+            }
+            const float distance = std::fabs(light.x - vx) + std::fabs(light.y - vy) +
+                std::fabs(light.z - vz) - light.ca;
+            if (distance >= 0.0f) {
+                continue;
+            }
+            const float intensity = -distance * light.la;
+            r += light.r * intensity;
+            g += light.g * intensity;
+            b += light.b * intensity;
+            hits++;
+        }
+        if (r > 1.0f) r = 1.0f;
+        if (g > 1.0f) g = 1.0f;
+        if (b > 1.0f) b = 1.0f;
+        static uint64_t vertexReports = 0;
+        if (std::getenv("TUROK2_ACCLAIM_TRACE") != nullptr &&
+            acclaimLights[2].ca >= 0.0f && (vertexReports++ < 32)) {
+            std::fprintf(stderr,
+                "[acclaim:vtx] pos=(%.1f,%.1f,%.1f) l2=(%.0f,%.0f,%.0f) ca=%.0f hits=%d\n",
+                vx, vy, vz, acclaimLights[2].x, acclaimLights[2].y,
+                acclaimLights[2].z, acclaimLights[2].ca, hits);
+        }
+        red = uint8_t(r * 255.0f + 0.5f);
+        green = uint8_t(g * 255.0f + 0.5f);
+        blue = uint8_t(b * 255.0f + 0.5f);
     }
 
     void RSP::setLightColor(uint8_t index, uint32_t value) {

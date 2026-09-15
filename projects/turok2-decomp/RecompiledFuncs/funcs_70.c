@@ -5155,9 +5155,17 @@ L_00444AA4:
     // 0x00444AB4: addiu       $sp, $sp, 0xB0
     ctx->r29 = ADD32(ctx->r29, 0XB0);
 ;}
+extern int turok2_skip_cache_advance(void);
+
 RECOMP_FUNC void func_00204DE0(uint8_t* rdram, recomp_context* ctx) {
     uint64_t hi = 0, lo = 0, result = 0;
     int c1cs = 0;
+    // T3 CCache__Advance: ages MemAgeList and evicts up to 10 entries.
+    // Unique 120 calls this every Update, so the grid LRU dies 4× faster
+    // than authored 30 Hz. Leftover-hold to the 0x6D20 clock.
+    if (turok2_skip_cache_advance()) {
+        return;
+    }
     // 0x00204DE0: addiu       $sp, $sp, -0x18
     ctx->r29 = ADD32(ctx->r29, -0X18);
     // 0x00204DE4: sw          $s0, 0x10($sp)

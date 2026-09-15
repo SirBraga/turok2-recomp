@@ -9,10 +9,10 @@
 
 namespace RT64 {
     inline void adjustProjectionMatrix(interop::float4x4 &matrix, const float aspectRatioScale) {
+        // Classic widescreen: only the X scale term. Turok parks
+        // view/shear in the rest of column 0; scaling those threw
+        // isolated frames into the fog fill (Expand flats).
         matrix[0][0] *= aspectRatioScale;
-        matrix[1][0] *= aspectRatioScale;
-        matrix[2][0] *= aspectRatioScale;
-        matrix[3][0] *= aspectRatioScale;
     }
     
     // ProjectionProcessor

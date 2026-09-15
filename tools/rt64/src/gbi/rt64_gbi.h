@@ -37,6 +37,7 @@ namespace RT64 {
         bool ReJ = false;
         bool computeMVP = false;
         bool pointLighting = false;
+        bool acclaimLighting = false;
     };
 
     struct GBIInstance {

@@ -32,6 +32,10 @@ namespace RT64 {
     struct State;
     struct GBI;
 
+        // Turok 2 Acclaim custom lighting. Clip space, on by default.
+    // TUROK2_ACCLAIM_LIGHT=0 disables.
+    bool acclaimLightingEnabled();
+
     struct RSP {
         struct Vertex {
             int16_t y;
@@ -116,6 +120,32 @@ namespace RT64 {
             DirLight dir;
         };
 
+        // Turok 2 / Acclaim 16-byte point light (GLideN64 F3DEX2ACCLAIM).
+        // Host layout matches 32-bit word-swapped RDRAM, same as Vertex.
+        struct AcclaimLightMem {
+            int16_t y;
+            int16_t x;
+            uint8_t g;
+            uint8_t r;
+            int16_t z;
+            int16_t ca;
+            uint8_t pad;
+            uint8_t b;
+            uint16_t qa;
+            uint16_t la;
+        };
+
+        struct AcclaimLight {
+            float x = 0.0f;
+            float y = 0.0f;
+            float z = 0.0f;
+            float ca = -1.0f;
+            float la = 0.0f;
+            float r = 0.0f;
+            float g = 0.0f;
+            float b = 0.0f;
+        };
+
         struct Texcoord {
             float s;
             float t;
@@ -161,6 +191,7 @@ namespace RT64 {
         std::array<uint32_t, RSP_MAX_VERTICES> indices;
         std::bitset<RSP_MAX_VERTICES> used;
         std::array<Light, RSP_MAX_LIGHTS + 1> lights;
+        std::array<AcclaimLight, 10> acclaimLights;
         int lightCount;
         uint32_t vertexFogIndex;
         uint32_t vertexLightIndex;
@@ -272,6 +303,9 @@ namespace RT64 {
         void pushViewport();
         void popViewport();
         void setLight(uint8_t index, uint32_t address);
+        void setLightAcclaim(int index, uint32_t address);
+        void applyAcclaimLighting(float vx, float vy, float vz,
+            uint8_t &r, uint8_t &g, uint8_t &b) const;
         void setLightColor(uint8_t index, uint32_t value);
         void setLightCount(uint8_t count);
         void setClipRatioEdge(uint8_t index, int16_t value);

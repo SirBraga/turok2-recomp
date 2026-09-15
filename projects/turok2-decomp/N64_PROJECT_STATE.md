@@ -215,7 +215,13 @@ Watch stderr `[fps:engine]`, `[rt64:source-rate]`, and `[rt64:interp]`.
 - Overlay (top-left): F8 skip cinema, F9 A, F5 save, F7 load, F3 hide.
 - F2 texture dump to `runtime-data/texture-dumps/` (no file dialog).
   F1 RT64 ImGui editor is D3D12/Vulkan only — Metal NewFrame SIGSEGVs.
-- F8 snaps cinema `currentTime` past the path end and pulses Start.
+- F8/P/Backspace arm the authored cinema skip (`CCinemaPlayer+0x60/+0x64`,
+  consumed by `func_00283CD4` → `func_00284468(1)` / `func_002844F0`).
+  Do **not** write `currentTime = pathEnd+1`: that only leaves the current
+  path window, the next shot JUMPS the camera, and mash-skip spawned in
+  the Adia water (`origin Y=-351`, no FPS arms, Draw on `806FF120`).
+  Live 2026-09-06 screenshot + `[debug] pulando cinema` 1:1 with
+  `[cin:cam] JUMP`. Start pulse is 2, not 45 unique-120 holds.
 - F5/F7 dump/restore 8MB RDRAM + useg bank window to `saves/quick.t2sav`.
   Format v2 stores the host pid. Every F7 stitches live OS back on:
   registered `osCreateThread` / `osCreateMesgQueue` objects, guest
@@ -870,6 +876,166 @@ dirty hook **failed**. Cinema cut-hold **failed**. Region hold **failed**
 (SWITCH was the wrong pairing). Skip-main **failed** (`[cin:skip]`
 fired; flats stayed). Do not lerp the cinema camera for 2× Hz.
 
+**Window / aspect clue 2026-09-06.** Split 31.5" → no flats.
+Maximize → flats back. Graphics already max. User A/B:
+**Resolution is not the knob. Aspect Original (4:3) = no flats.
+Expand (16:9) is the trigger.**
+
+RT64 Expand sets `aspectRatioScale = window/VI` (~1.33 on 16:9)
+and `adjustProjectionMatrix` multiplies projection column 0.
+Original leaves the authored 4:3 matrix. A tall split window
+letterboxes and `max(window, source)` falls back to 4:3 — same
+as menu Original. That is why black bars killed the flick.
+
+`TUROK2_WIDE_CULL_OFF` never tested this: it only stops our CPU
+TCorners grow. RT64 still Expand-renders. Do not retry AABB /
+vis / KEEP / tri-hold.
+
+**Expand viewport fallback FAILED 2026-09-06 — reverted.** Theory
+was that a 3D pair missing the 10% VI-scissor match dropped
+`aspectRatioScale` to 1 while the fog fill still painted 16:9, so
+an empty viewport ∩ scissor discarded the triangles. Shipped
+"keep Expand on any perspective pair" + "pair scissor as a wide
+viewport" + matching `rt64_projection_processor` scale. User:
+flats stayed in Expand. `git checkout` on both render files.
+Do not retry a viewport/scissor widen as the Expand fix.
+
+Still true and unexplained: **Aspect Original has no flats,
+Expand does.** Viewport/scissor widen failed. Scaling the whole
+X column (including `[3][0]` then `[1][0]`/`[2][0]`) failed.
+Now only `[0][0]` is scaled (classic widescreen). Do not retry
+viewport/scissor widen.
+
+Clip-space flashlight **works**. Dungeon walls going black as
+you walk is the other seven Acclaim slots: n=3–9 were the
+disabled sentinel wiping torches, so only the cyan flashlight
+lit vertex-colour-0 walls. `setLightAcclaim` now peeks the
+eight-light block at n=2 and ignores later disabled overwrites.
+
+`[scene:nsec]` is now behind `TUROK2_SCENE_TRACE` (was printing
+every empty cinema Draw; a visible tty could stall the game).
+
+### Port of Adia pistol-gate void — 2026-09-06
+
+Not a GPU quality drop. Live log while the arched doorway and the
+entered room were black: `nsec=1 emits=0 vispass=0 sec=1 MISS`
+every Draw, `spanxz≈20k` (AABB already huge). Reload only ran on
+`nsec<=0`, so the listed cell never got replaced. `[scene:draw]`
+printed on every MISS (~120 lines/s at unique 120) and
+`TUROK2_ACCLAIM_TRACE` printed per vertex — hitch amplifier, not
+the hole. Pickup / HUD / gun still draw (object path).
+
+Draw now reloads from `func_002216DC` on a MISS using eye±4096
+union AnimMin (not the 20k ViewMin — that would LRU-evict the
+current room), keeps that box for 120 emitting Draws, and throttles
+`[scene:draw]` unless `TUROK2_SCENE_TRACE=1`. Opt-out still
+`TUROK2_NO_SEC_RELOAD=1`. Do not feed ViewMin to Load for this hole.
+
+**Eye-test FAILED 2026-09-06 (user: still black).** Live log:
+`reload=1->1` then `reload=15->15` — Load returned the same list.
+`nsec=15 emits=0 vispass=0 sec=15 MISS`: the cells are listed,
+Draw never reaches `CGameSimpleInstance` emit. Not AnimMin.
+LibTEngine T2 `CActiveGridSection` is `{CMemEntry* m_pmeGridSection;
+CBoundsRect* m_pBoundsRect}` (8 bytes). T3 `cache.h` DLIST locks
+`0x200`/`0x400`; T2 `func_0020565C` ORs those into CMemEntry+0xC
+(flags; T2 lock count is +0x08, unlike T3 flags-at-+0x08).
+CISet get (`func_002017D4`) then instance count at block+4.
+Do not retry AnimMin reload for this hole. Do not treat Acclaim
+lighting as this void (objects/HUD still draw).
+
+**CCache__Advance leftover 2026-09-06 (from T3 tengine.c / cache.h).**
+T3 `CEngineApp__Update` calls `CCache__Advance()` once per Update.
+T2 is `func_00204DE0` (jal `0x00288084` right after increment):
+countdown at `gCache+0xC08` (`0x800D8DEC`), age++ at `+0xC0C`, then
+up to 10 `func_00203330` evicts. Unique 120 runs that 4× per authored
+frame, so unlocked grid `CMemEntry` data is freed while
+`m_ActiveGridSections` still lists the cells (`nsec>0`, `ninst=0`,
+`vispass=0`). This is a cache *clock*, not `gFrameCount`.
+`turok2_skip_cache_advance` leftover-holds Advance to the 0x6D20
+wall clock (30 Hz gameplay / 15 Hz cinema). Opt-out
+`TUROK2_NO_CACHE_ADVANCE_HOLD=1`. `[scene:pme]` now prints on the
+first MISS of a streak (was hidden by the 64-Draw throttle).
+Do not leftover-hold `gFrameCount` / `0x6D1B`.
+
+**User 2026-09-06: "carregar o mundo todo que foi removido".**
+Draw Distance slider + far-clip scale were removed 2026-09-05 (menu).
+Fog still has a 2× floor; far did not. Load (`func_002216DC`) still
+tested `m_AnimMin`; Draw used the expanded `m_ViewMin`. This session
+had **no MISS** (`nsec=22 emits≈100`) while `[tri:hold] tris=0/120`
+— CPU was emitting. Relit silent far 2× floor after `0x0027D9A4`
+(`TUROK2_NO_FAR_FLOOR=1`) and union View→Anim at Load
+(`TUROK2_NO_LOAD_VIEW=1`). Not the Draw-time miss-reload (kill-listed).
+Not the Graphics slider. Do not leftover `gFrameCount`.
+
+**User 2026-09-06: "sem sucesso / bugou mais ainda / antes dos
+ajustes de performance ontem funcionava".** Reverted the default-on
+experiments that blacked walkable walls and crashed F7:
+
+- Acclaim lighting was turned **off** here (walls looked untextured).
+  Restored **on** the same day for the FPS hand / flashlight; isolate
+  with `TUROK2_ACCLAIM_LIGHT=0` if dungeon walls black again.
+- `CCache__Advance` leftover **off** (crashed in `func_00203330`
+  after F7). Opt-in `TUROK2_CACHE_ADVANCE_HOLD=1`.
+- Draw AABB skip, vis AND force, vis-mask hold, ViewMin expand,
+  world-skip gate, silent far 2×, RT64 tri-hold: all **off**.
+  Load-view union already off.
+
+Keep: `0x6D20` leftover, lastPos/explosion holds, sky TCorners,
+Expand `[0][0]` only, Graphics Hz. Do not re-enable the cache/AABB/vis
+stream hacks without a passing eye-test.
+
+**User 2026-09-06: last texture patch still bugged the game.**
+Removed the remaining texture-stream hooks (Load ViewMin→AnimMin,
+silent far 2×, `func_00214DBC` grid-dl counter). Authored Load/Draw
+distance again.
+
+**User 2026-09-06: hand missing until walk, portal return displaced,
+bring flashlight back.** Flashlight is on again (clip). The spawn
+shot was **not** lighting: live log while the screenshot was water
++ no arms + HUD 100 — each P printed `[debug] pulando cinema` then
+`[cin:cam] JUMP`, last origin `(-1540.9,-351.4,-1475.7)` on main,
+Draw still `cam=806FF120`. Skip was slamming `currentTime=pathEnd+1`
+(one shot) plus 45 Start holds. Now skip arms `+0x60/+0x64` only.
+
+### Acclaim custom lighting — clip space (GLideN64)
+
+Turok 2's `F3DEX2.NoN.fifo 2.05 (Acclaim)` does **not** use N64
+lighting for dynamic lights. Eight **16-byte** point lights load
+through `G_MV_LIGHT` at offset > 24*3 (after the two lookats and
+the standard block); the vertex pass runs when geometry mode bit
+`G_ACCLAIM_LIGHTING = 0x80` is set, with `G_LIGHTING` **off**.
+Angrylion (LLE) executes the ucode, which is why the A/B looked
+clean. Same ucode in Armorines / South Park / Turok 3;
+GLideN64 calls it `F3DEX2ACCLAIM`.
+
+16-byte layout (big-endian byte offsets): `x,y,z` s16 at 0/2/4,
+`r,g,b` u8 at 6/7/8, `ca` s16 at 10, `la` u16 at 12 (`/65536`),
+`qa` u16 at 14. Intensity is manhattan:
+`d = |lx-vx|+|ly-vy|+|lz-vz| - ca`, skip if `d >= 0` or `ca < 0`,
+else `color += rgb * (-d * la)`, clamp 1.
+
+**Eye-test FAILED 2026-09-06** on **model-space** and **world-space**:
+flashlight did not follow the player; pistol room went black.
+Traces showed light n=2 walking in clip-scale coords
+`(418,128,-288)→(201,25,163)` cyan `ca=1023` while verts were
+compared in world. GLideN64 applies after `gSPTransformVertex`
+(combined MVP). Default is now **clip**. Do **not** write the lit
+colour back into the RSP vertex cache. Do not retry model/world.
+
+`TUROK2_ACCLAIM_LIGHT=0` disables.
+`TUROK2_ACCLAIM_SPACE=model|world|view|clip` (default clip).
+`TUROK2_ACCLAIM_TRACE=1` logs live lights + vertex hits.
+
+### Expand — do not scale projection translation
+
+Aspect Original = no flats. Expand = flats. Viewport/scissor
+widen **failed** (reverted). Next class: `adjustProjectionMatrix`
+was multiplying the **entire** X column, including `[3][0]`.
+Turok force-matrix can park view translation there; scaling it
+shifts the eye for isolated frames and the widened fog fill is
+the flat. Now only `[0][0]`/`[1][0]`/`[2][0]` are scaled.
+Do not retry viewport/scissor widen.
+
 ## Weapon tracers / barrel explosions vanish at unique 120 — leftover lastPos
 
 User 2026-09-05: inside the game a lot feels accelerated; weapon shots
@@ -1166,6 +1332,13 @@ misplaced entries broke boot. Remaining ones (texture loader, audio thread
 - Nearest-function lookup is safe only as a diagnostic label. Runtime jalr
   dispatch must use the exact registered address; no automatic `target-N`
   fallback or register/table mutation belongs in the jalr observation hook.
+- Adon / stairs flats track RT64 **Aspect Expand**, not Auto
+  resolution. Menu Original (4:3) cleared them on a maxed 31.5"
+  window. `WIDE_CULL_OFF` is not that A/B — it never disabled
+  `adjustProjectionMatrix`.
+- A tall split window letterboxes and drops Expand back to 4:3
+  (`aspectRatioTarget = max(window, source)`). Bars without a
+  menu change are the same as Aspect Original.
 - A 60 Hz window is not proof of 60 Hz motion. Record engine updates, RT64's
   advertised source rate, interpolation eligibility, and rendered frame count
   separately. Unique 60 Hz DLs need source=60 and `targetRate=0`. Asking RT64

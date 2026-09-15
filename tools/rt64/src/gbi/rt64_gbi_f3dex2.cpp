@@ -43,8 +43,17 @@ namespace RT64 {
                 state->rsp->forceMatrix((*dl)->w1);
                 break;
             case F3DEX2_G_MV_LIGHT: {
-                uint8_t offset = (*dl)->p0(8, 8) * 8;
-                int index = (offset / 24);
+                const uint32_t offset = uint32_t((*dl)->p0(8, 8)) * 8u;
+                const bool acclaim = acclaimLightingEnabled() &&
+                    state->ext.interpreter->hleGBI->flags.acclaimLighting;
+                // Acclaim (Turok 2) loads eight 16-byte point lights after the
+                // standard 24-byte lookat/light block. GLideN64 F3DEX2ACCLAIM.
+                if (acclaim && (offset > 24u * 3u)) {
+                    const int n = 2 + int((offset - 24u * 4u) / 16u);
+                    state->rsp->setLightAcclaim(n, (*dl)->w1);
+                    break;
+                }
+                int index = int(offset / 24);
                 if (index >= 2) {
                     state->rsp->setLight(index - 2, (*dl)->w1);
                 }
